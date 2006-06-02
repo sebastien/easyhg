@@ -205,23 +205,23 @@ class Repository:
     def summary( self ):
         """Returns a text summary of this repository"""
         text    = ""
-        text += "Name        : %s (%s)\n" % (self.name(), self.type())
-        text += "Description : %s\n" % (self.description())
-        text += "Path        : %s\n" % (self._path)
+        text += "name:        %s (%s)\n" % (self.name(), self.type())
+        text += "description: %s\n" % (self.description())
+        text += "path:        %s\n" % (self._path)
         owners         = self.owners()
         developers     = self.developers()
         if   len(owners) == 0:
             pass
         elif len(owners) ==1:
-            text += "Owner       : " + owners[0] + "\n"
+            text += "owner:       " + owners[0] + "\n"
         else:
-            text += "Owners      : " + ", ".join(owners) + "\n"
+            text += "Owners       " + ", ".join(owners) + "\n"
         if   len(developers) == 0:
             pass
         elif len(developers) == 1:
-            text += "Developer   : " + developers[0] + "\n"
+            text += "developer:   " + developers[0] + "\n"
         else:
-            text += "Developers  : " + ", ".join(developers)
+            text += "developers:  " + ", ".join(developers)
         return text
 
     def updateConfig( self ):
@@ -258,7 +258,7 @@ class CentralRepository(Repository):
         """Returns the absolute path to the child repositories for this central
         repository."""
         c = self.mget("children")
-        if c == "None": return []
+        if c == ["None"]: return []
         else: return c
 
     def summary( self ):
@@ -266,8 +266,8 @@ class CentralRepository(Repository):
         lines = list(Repository.summary(self).split("\n"))
         c = self.children()
         if c:
-            lines.append("Children    : %d" % (len(c)))
-        return "\n".join(lines)
+            lines.append("children:    %d" % (len(c)))
+        return "\n".join(lines[:-1])
 
 # ------------------------------------------------------------------------------
 #
@@ -314,8 +314,8 @@ class WorkingRepository(Repository):
         meta  = [self.type()]
         if not self.isSynchronized(): meta.append("out of sync")
         if self.isModified(): meta.append("modified")
-        lines[0] = "Name        : %s (%s)" % (self.name(), ", ".join(meta))
-        lines.insert(3, "Parent      : " + self._parent._path)
+        lines[0] = "name:        %s (%s)" % (self.name(), ", ".join(meta))
+        lines.insert(3, "parent:      " + self._parent._path)
         return "\n".join(lines)
 
 # ------------------------------------------------------------------------------
