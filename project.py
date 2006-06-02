@@ -13,7 +13,7 @@
 
 from mercurial.demandload import demandload
 from mercurial.i18n import gettext as _
-demandload(globals(), 'mercurial.ui mercurial.hg os string')
+demandload(globals(), 'mercurial.ui mercurial.hg os string time')
 
 # ------------------------------------------------------------------------------
 #
@@ -21,10 +21,11 @@ demandload(globals(), 'mercurial.ui mercurial.hg os string')
 #
 # ------------------------------------------------------------------------------
 
-def update_configuration( text, values ):
+def update_configuration( path, values ):
     """Updates the [project] section of the Mercurial configuration to be filled
     with the given set of values. If the section does not exist, it will be
     appended, if it already exists, it will be rewrited."""
+    f = open(path, 'r') ; text = f.read() ; f.close()
     result          = []
     current_section = None
     # For every line of the Mercurial RC file
@@ -32,16 +33,26 @@ def update_configuration( text, values ):
         # If we are in a section, we log it
         if line.strip().startswith("["):
             current_section = line.strip()[1:-1].strip().lower()
+            result.append(line)
+            last_section = {}
+            # We take care of the paths.default-push
+            if current_section == "paths" and values.get("parent"):
+                result.append("default-push = %s" % (values[parent]))
         elif current_section == "project":
-            for key, value in values:
+            for key, value in values.items():
                 result.append("%s = %s" % (key, value))
             current_section = "SKIP"
+        elif current_section == "paths" and values.get("parent"):
+            if line.strip().lower().startwith("default-push"): pass
+            else: result.append(line)
         elif current_section == "SKIP":
             pass
         else:
             result.append(line)
+    text = "\n".join(result)
+    f = open(path, 'w') ; f.write(text) ; f.close()
     # Returns the result as text
-    return "\n".join(result)
+    return text
 
 def expand_path( path ):
     """Expands env variables and ~ symbol into the given path, and makes it
@@ -95,10 +106,20 @@ class Repository:
             self._repo     = repo
         else:
             self._path     = self._ui.expandpath(path)
-            self._repo     = mercurial.hg.repository(self._ui, os.path.dirname(self._path))
+            if self._path.endswith(".hg"):
+                self._path = os.path.dirname(self._path)
+            self._repo     = mercurial.hg.repository(self._ui, self._path)
+        self._updated      = {}
+        self._owners       = []
+        self._developers   = []
 
     def get( self, value ):
         return self._ui.config("project", value)
+
+    def set( self, name, value ):
+        self._ui.setconfig("project", name, value)
+        assert self.get(name) == value
+        self._updated[name] = value
 
     def name(self):
         return self.get("name")
@@ -110,10 +131,20 @@ class Repository:
         raise Exception("Must be implemented by subclass")
 
     def owners(self):
-        raise Exception("Must be implemented by subclass")
+        if not self._owners:
+            self._owners = self.get("owner") or self.get("owners")
+            if not self._owners: self._owners = []
+            else: self._owners = map(string.strip, self._owners.split(","))
+        return self._owners
         
     def developers(self):
-        raise Exception("Must be implemented by subclass")
+        if not self._developers:
+            authors = {}
+            for changes in self.changes():
+                if changes[0] in self.owners(): continue
+                authors[changes[0]] = True
+            self._developers = authors.keys()
+        return self._developers
 
     def path(self):
         return self._path
@@ -130,10 +161,11 @@ class Repository:
         """Returns the number of changes in this repository."""
         return self._repo.changelog.count()
 
-    def changes( self, n=10 ):
+    def changes( self, n=None ):
         """Yields the n (10 by default) latest changes in this
         repository. Each change is returned as (author, date, description, files)"""
         changes_count = self._repo.changelog.count()
+        if n == None: n = changes_count
         for i in range(min(n,changes_count)):
             # We get the changeset node
             changeset_ref = self._repo.changelog.node(changes_count - i - 1)
@@ -154,18 +186,31 @@ class Repository:
         text += "Name        : %s (%s)\n" % (self.name(), self.type())
         text += "Description : %s\n" % (self.description())
         text += "Path        : %s\n" % (self._path)
-        return text
         owners         = self.owners()
-        developers = self.developers()
-        if len(owners) ==1:
+        developers     = self.developers()
+        if   len(owners) == 0:
+            pass
+        elif len(owners) ==1:
             text += "Owner       : " + owners[0] + "\n"
         else:
             text += "Owners      : " + ", ".join(owners) + "\n"
-        if len(developers) == 1:
+        if   len(developers) == 0:
+            pass
+        elif len(developers) == 1:
             text += "Developer   : " + developers[0] + "\n"
         else:
             text += "Developers  : " + ", ".join(developers)
         return text
+
+    def updateConfig( self ):
+        """Updates this repository configuration file to reflect the changes
+        made to the repository."""
+        if not self._updated: return
+        values = {}
+        for key, value in self._ui.configitems("project"): values[key] = value
+        for key, value in self._updated.items(): values[key] = value
+        hgrc = os.path.join(self._path, ".hg", "hgrc")
+        update_configuration(hgrc, values)
 
 # ------------------------------------------------------------------------------
 #
@@ -196,10 +241,10 @@ class WorkingRepository(Repository):
         self._parent = None
 
     def name(self):
-        return self._parent.name()
+        return self.parent().name()
 
     def description(self):
-        return self._parent.description()
+        return self.parent().description()
 
     def type(self):
         return "working"
@@ -240,15 +285,43 @@ class WorkingRepository(Repository):
         if not self.isSynchronized(): meta.append("out of sync")
         if self.isModified(): meta.append("modified")
         lines[0] = "Name        : %s (%s)" % (self.name(), ", ".join(meta))
-        lines.insert(3, "Parent : " + self._parent._path)
+        lines.insert(3, "Parent      : " + self._parent._path)
         return "\n".join(lines)
-
 
 # ------------------------------------------------------------------------------
 #
 # COMMANDS
 #
 # ------------------------------------------------------------------------------
+
+HELP = """\
+project [info|parent|clone]
+
+   Enables easy management of repositories for projects with a central
+   repository and many working repositories related to it.
+
+   A central repository can be given a 'name' and a 'description', and each
+   working repository can be related to by setting the 'parent' property to
+   point to the central repository.
+
+project info [property=value...]
+
+    Displays a summary of the project, and telling wether the current repository
+    is the central or a working directory. If arguments are given, properties
+    can be modified in the project configuration (.hg/hgrc, [project] section).
+
+project parent [LOCATION]
+
+    Displays information on this repository parent (only works if
+    current repository is a working repository). If a location is given, the
+    repository parent is set and the repository becomes a workinf repository.
+
+project clone LOCATION
+
+    Clones the central repository for this project to the given location. The
+    clone will be a working repository for the project.
+
+""" 
 
 class Commands:
     """This defines the set of Mercurial commands that constitute the project
@@ -258,14 +331,17 @@ class Commands:
         pass
 
     def main(self, ui, repo, *args, **opts):
+        if len(args) == 0: args = ["info"]
         cmd = args[0]
         # We ensure that the given repository is wrapped in our wrapper
         if not isinstance(repo, Repository):
             repo = Repository_load(repo.path)
         # And we process the arguments
-        if cmd == "info":
+        if   cmd == "info":
             self.info(ui, repo, *args[1:])
-        if cmd == "parent":
+        elif cmd == "help":
+            ui.write(HELP)
+        elif cmd == "parent":
             if isinstance(repo, CentralRepository):
                 ui.warn("This is a central repository, and it has no parent\n")
             else:
@@ -273,12 +349,18 @@ class Commands:
                 self.main(ui, repo, *args[1:], **opts)
 
     def info(self, ui, repo, *args, **opts):
-        print repo.summary()
+        if not args:
+            ui.write(repo.summary() + "\n")
         for arg in args:
+            print repo.parent().summary()
             if arg.find("=")!=-1 and len(arg.split("=")) == 2:
                 key, value = map(string.strip, arg.split("="))
+                old = repo.get(key)
+                repo.set(key, value)
+                ui.write("Setting '%s' to '%s' (was %s)\n" % (key, value, old))
             else:
                 raise Exception("Bad argument: " + arg)
+            repo.updateConfig()
 
 # ------------------------------------------------------------------------------
 #
