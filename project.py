@@ -25,9 +25,12 @@ def update_configuration( path, values ):
     """Updates the [project] section of the Mercurial configuration to be filled
     with the given set of values. If the section does not exist, it will be
     appended, if it already exists, it will be rewrited."""
-    f = open(path, 'r') ; text = f.read() ; f.close()
+    # The given configuration file may not exist
+    if not os.path.isfile(path): text = ""
+    else: f = open(path, 'r') ; text = f.read() ; f.close()
     result          = []
     current_section = None
+    sections        = {}
     # For every line of the Mercurial RC file
     for line in text.split("\n"):
         # If we are in a section, we log it
@@ -35,6 +38,7 @@ def update_configuration( path, values ):
             current_section = line.strip()[1:-1].strip().lower()
             result.append(line)
             last_section = {}
+            sections[current_section] = True
             # We take care of the paths.default-push
             if current_section == "paths" and values.get("parent"):
                 result.append("default-push = %s" % (values[parent]))
@@ -49,6 +53,11 @@ def update_configuration( path, values ):
             pass
         else:
             result.append(line)
+    # If there was no project section, we create it
+    if not sections.get("project"):
+        result.append("[project]")
+        for key, value in values.items():
+            result.append("%s = %s" % (key, value))
     text = "\n".join(result)
     f = open(path, 'w') ; f.write(text) ; f.close()
     # Returns the result as text
@@ -114,12 +123,25 @@ class Repository:
         self._developers   = []
 
     def get( self, value ):
+        """Gets a property of this project"""
         return self._ui.config("project", value)
 
+    def mget( self, value ):
+        """Gets a property of with multiple values"""
+        return map(string.strip, str(self.get(value)).split())
+
     def set( self, name, value ):
+        """Sets a property for this project (the property has a single
+        value)."""
         self._ui.setconfig("project", name, value)
         assert self.get(name) == value
         self._updated[name] = value
+
+    def add( self, name, value ):
+        """Adds the given value to the given property."""
+        p = self.get(name)
+        if p: self.set(name, p + ", " + value)
+        else: self.set(name, value)
 
     def name(self):
         return self.get("name")
@@ -228,6 +250,25 @@ class CentralRepository(Repository):
     def type(self):
         return "central"
 
+    def parent(self):
+        """Returns this repository, as it has no parent."""
+        return self
+
+    def children(self):
+        """Returns the absolute path to the child repositories for this central
+        repository."""
+        c = self.mget("children")
+        if c == "None": return []
+        else: return c
+
+    def summary( self ):
+        """Returns a text summary of this repository"""
+        lines = list(Repository.summary(self).split("\n"))
+        c = self.children()
+        if c:
+            lines.append("Children    : %d" % (len(c)))
+        return "\n".join(lines)
+
 # ------------------------------------------------------------------------------
 #
 # WORKING PROJECT
@@ -252,21 +293,11 @@ class WorkingRepository(Repository):
     def parent(self):
         if not self._parent:
             self._parent = Repository_load(self.get("parent"))
+            # We ensure that this repository is registered in the parent
+            if self._path not in self._parent.mget("children"):
+                self._parent.add("children", self._path)
+                self._parent.updateConfig()
         return self._parent
-
-    def owners(self):
-        r = []
-        r.extend(self._owners)
-        for own in self._parent.owners():
-            if own not in r: r.append(own)
-        return r
-        
-    def developers(self):
-        r = []
-        r.extend(self._developers)
-        for dev in self._parent.developers():
-            if dev not in r: r.append(dev)
-        return r
 
     def isSynchronized( self ):
         """Tells wether this repository is synchronized with the parent
@@ -277,7 +308,6 @@ class WorkingRepository(Repository):
         """Tells wether this repository has outgoing changesets."""
         return self._repo.findoutgoing(self._parent._repo)
 
-  
     def summary( self ):
         """Returns a text summary of this repository"""
         lines = list(Repository.summary(self).split("\n"))
@@ -316,6 +346,11 @@ project parent [LOCATION]
     current repository is a working repository). If a location is given, the
     repository parent is set and the repository becomes a workinf repository.
 
+project children
+
+     Lists the repositories that are children of this project central
+     repository
+
 project clone LOCATION
 
     Clones the central repository for this project to the given location. The
@@ -343,10 +378,25 @@ class Commands:
             ui.write(HELP)
         elif cmd == "parent":
             if isinstance(repo, CentralRepository):
-                ui.warn("This is a central repository, and it has no parent\n")
+                ui.warn("This is a central repository, so it has no parent\n")
             else:
                 repo = repo.parent()
                 self.main(ui, repo, *args[1:], **opts)
+        elif cmd == "children":
+            children = repo.parent().children()
+            if not children:
+                ui.write("This project has no children (yet)\n")
+            else:
+                if len(children) == 1:
+                    ui.write("This project has %d child:\n" % (len(children)))
+                else:
+                    ui.write("This project has %d children:\n" % (len(children)))
+                for c in children:
+                    r = Repository_load(c)
+                    ui.write(" - ", c, " (",
+                    ", ".join(Repository_load(c).owners()), ")\n")
+        else:
+            ui.warn("Unknown command: ", cmd, "\n")
 
     def info(self, ui, repo, *args, **opts):
         if not args:
