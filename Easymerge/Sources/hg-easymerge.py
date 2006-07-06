@@ -7,16 +7,12 @@
 # Author    : Sebastien Pierre                           <sebastien@xprima.com>
 # License   : GNU Public License         <http://www.gnu.org/licenses/gpl.html>
 # Creation  : 05-May-2006
-# Last mod  : 09-May-2006
-# History   :
-#             09-May-2006 - Documentation and terminology update
-#             08-May-2006 - Added list, resolve, undo, and the Conflicts class.
-#             05-May-2006 - First implementation
+# Last mod  : 06-Jul-2006
 # -----------------------------------------------------------------------------
 
-import os, sys, re, shutil, difflib
+import os, sys, re, shutil, difflib, stat
 
-__version__ = "0.2.2"
+__version__ = "0.9.0"
 PROGRAM_NAME = os.path.splitext(os.path.basename(__file__))[0]
 
 MERGETOOL = 'gvimdiff'
@@ -102,7 +98,7 @@ def warning( *args ):
     print format(" ".join(map(str,args)),MAGENTA)
 
 def info( *args ):
-    print format(PROGRAM_NAME + ": " + " ".join(map(str,args)),CYAN)
+    print format(" ".join(map(str,args)),CYAN)
 
 def log( *args ):
     print " ".join(map(str,args))
@@ -126,6 +122,15 @@ def cutpath( root, path ):
     if path.startswith(root): return path[len(root):]
     else: return path
 
+def copy( source, dest ):
+    """Copies the content of the source to the dest, preserving the permissions
+    of the dest file."""
+    dest = file(dest, 'w')
+    source = file(source, 'r')
+    dest.write(source.read())
+    dest.close()
+    source.close()
+
 def backup_existing( path ):
     """If the given path exists and is a file, the path will be copied to a file
     in the same directory, with the same name suffixed by a number (.1, .2, .3),
@@ -135,7 +140,7 @@ def backup_existing( path ):
     while os.path.exists(new_path):
         new_path = "%s.%s" % (path, i)
         i += 1
-    shutil.copy(path, new_path)
+    copy(path, new_path)
     return new_path
 
 def ensure_notexists( path ):
@@ -366,7 +371,7 @@ def resolve_conflict(rootdir, number, action="merge"):
     elif action == "update":
         log("Resolving conflict", conflict_file, "by",
         format("using the .other file", color=BLUE, weight=BOLD))
-        shutil.copy(conflict.other(), conflict.path())
+        copy(conflict.other(), conflict.path())
     else:
         raise Exception("Unknown resolution action: " + action)
     res = ask("Did you resolve the conflict (y/n) ? ")
@@ -390,7 +395,6 @@ def resolve_conflicts(rootdir, *numbers):
         for number in numbers:
            resolve_conflict(rootdir, number) 
 
-
 def undo_conflicts(rootdir, *numbers):
     """Undo the given conflicts."""
     conflicts = Conflicts(rootdir)
@@ -408,7 +412,7 @@ def undo_conflicts(rootdir, *numbers):
         if res == "y":
             log("Undoing conflict resolution, using %s as original data" % (conflict.current()))
             conflict.unresolve()
-            shutil.copy(conflict.current(), conflict.path())
+            copy(conflict.current(), conflict.path())
         else:
             log("Conflict left as it is.")
 
@@ -511,6 +515,7 @@ def run(args):
         shutil.copyfile(original, original_copy)
         shutil.copyfile(parent,   parent_copy)
         shutil.copyfile(other,    other_copy)
+        map(lambda p:os.chmod(p, stat.S_IREAD|stat.S_IRUSR|stat.S_IRGRP), (original_copy, parent_copy, other_copy))
         info("You can resolve conflicts with:", PROGRAM_NAME, "resolve 0 (keep|update|merge)")
         return 0
     else:
