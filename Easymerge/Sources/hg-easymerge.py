@@ -17,12 +17,13 @@
 import os, sys, re, shutil, difflib
 
 __version__ = "0.2.2"
+PROGRAM_NAME = os.path.splitext(os.path.basename(__file__))[0]
 
 MERGETOOL = 'gvimdiff'
 if os.environ.has_key("MERGETOOL"): MERGETOOL = os.environ.get("MERGETOOL")
 
 USAGE = """\
-hg-svnmerge %s
+%s %s
 
     hg-svnmerge is tool for Subversion-like merging in Mercurial. It gives more
     freedom to the resolution of conflicts, the user can individually pick the
@@ -33,13 +34,11 @@ hg-svnmerge %s
 
 Commands :
 
-    list    [DIRECTORY]             - list registered conflicts
-    resolve [CONFLICT]              - resolves all/given conflict(s)
-    undo    [CONFLICT]              - undo a resolution
-    clean   [DIRECTORY]             - cleans up the conflict files
-    commit                          - try to commit the changes (TODO)
-
-    CURRENT PARENT OTHER            - registers a conflict (used by Mercurial)
+    list    [DIRECTORY]                     - list registered conflicts
+    resolve [CONFLICT] [parent|other|merge] - resolves all/given conflict(s)
+    undo    [CONFLICT]                      - undo a resolution
+    clean   [DIRECTORY]                     - cleans up the conflict files
+    commit                                  - try to commit the changes (TODO)
 
 Usage:
 
@@ -57,10 +56,56 @@ Usage:
     your repository. Committing automatically cleans the current directory from
     files created by hg-svnmerge, but you can also `clean` the directory
     whenever you want (for instance, when you do not want to merge anymore).
-""" % (__version__)
+""" % (PROGRAM_NAME, __version__)
 
 CLEAN_MATCH    = re.compile("^.+\.(current|parent|other)(\.\d+)?$")
 CONFLICTS_FILE = ".hgconflicts"
+
+# ------------------------------------------------------------------------------
+#
+# COLORED TERMINAL OUTPUT
+#
+# ------------------------------------------------------------------------------
+
+BLACK = "BK"; RED = "RE"; BLUE="BL";  GREEN = "GR"; MAGENTA="MG"; CYAN = "CY"
+BROWN = "BW"
+PLAIN = ""  ; BOLD = "BOLD" 
+CODES = {
+  BLACK         :"00;30", BLACK+BOLD    :"01;30",
+  RED           :"00;31", RED+BOLD      :"01;31",
+  GREEN         :"00;32", GREEN+BOLD    :"01;32",
+  BROWN         :"00;33", BROWN+BOLD    :"01;33",
+  BLUE          :"00;34", BLUE+BOLD     :"01;34",
+  MAGENTA       :"00;35", MAGENTA+BOLD  :"01;35",
+  CYAN          :"00;36", CYAN+BOLD     :"01;36",
+}
+
+def format( message, color=BLACK, weight=PLAIN ):
+  """Formats the message to be printed with the following color and weight"""
+  return '[0m[' + CODES[color+weight] + 'm' + str(message) + '[0m'
+
+# -----------------------------------------------------------------------------
+#
+# LOGGING
+#
+# -----------------------------------------------------------------------------
+
+def ask( question ):
+    print format(question, weight=BOLD) + " ",
+    return sys.stdin.readline().lower().strip()
+
+def error( *args ):
+    print format("ERROR: ", color=RED, weight=BOLD) + format(
+    " ".join(map(str,args)), color=RED)
+
+def warning( *args ):
+    print format(" ".join(map(str,args)),MAGENTA)
+
+def info( *args ):
+    print format(PROGRAM_NAME + ": " + " ".join(map(str,args)),CYAN)
+
+def log( *args ):
+    print " ".join(map(str,args))
 
 # -----------------------------------------------------------------------------
 #
@@ -93,6 +138,10 @@ def backup_existing( path ):
     shutil.copy(path, new_path)
     return new_path
 
+def ensure_notexists( path ):
+    if os.path.exists(path):
+        raise Exception(path)
+
 def diff_count( a, b ):
     """Returns the number of lines conflicting between a and b and the total
     number of lines in a."""
@@ -110,13 +159,67 @@ def diff_count( a, b ):
 #
 # -----------------------------------------------------------------------------
 
+class Conflict:
+    """Represents a conflict between two files."""
+
+    RESOLVED   = "resolved"
+    UNRESOLVED = "unresolved"
+    SEPARATOR  = "--vs--"
+
+    def __init__( self, number, path, state=None ):
+        if not state: state = Conflict.UNRESOLVED
+        assert type(number) == int
+        self.number    = number
+        self.state     = state
+        self._path     = path
+
+    def resolve(self):
+        self.state = self.RESOLVED
+
+    def unresolve(self):
+        self.state = self.UNRESOLVED
+
+    def path( self ):
+        return self._path
+
+    def current( self ):
+        return self._path + ".current"
+
+    def parent( self ):
+        return self._path + ".parent"
+
+    def other( self ):
+        return self._path + ".other"
+
+    @staticmethod
+    def parse( line, number=-1 ):
+        """Returns a new conflict from the given conflict string
+        representation."""
+        line     = line.strip()
+        colon    = line.find(":")
+        if not line or colon == -1: return
+        number   = line[:colon].strip()
+        sep      = line.find(Conflict.SEPARATOR)
+        original = line[colon+1:sep].strip()
+        if number.startswith("R"):
+            status = Conflict.RESOLVED
+            number = number[1:]
+        else: status = Conflict.UNRESOLVED
+        return Conflict(int(number), original, status)
+
+    def asString( self ):
+        a = cutpath(os.path.abspath(os.getcwd()), self.path())
+        b = cutpath(os.path.abspath(os.getcwd()), self.other())
+        p = self.state == self.RESOLVED and "R" or ""
+        return "%s%4s: %s %s %s" % (p, self.number, a, self.SEPARATOR, b)
+
+    def __str__( self ):
+        return self.asString()
+
 class Conflicts:
     """This is a utility class that represents the list of conflicts, and
     whether they are resolved or not. It is used by all commands, and makes it
     easy to manage the conflicts file."""
-
-    RESOLVED   = "resolved"
-    UNRESOLVED = "unresolved"
 
     def __init__( self, path ):
         # We look for the parent directory where the conflicts file is located
@@ -144,16 +247,8 @@ class Conflicts:
         f = file(self._path, "rt")
         # We read the lines and fill in the _conflicts list
         for line in f.readlines():
-            line = line[:-1]
-            line = line.strip()
-            if not line or line.find(":") == -1: continue
-            colon  = line.find(":")
-            number = line[:colon].strip()
-            files  = line[colon+1:].strip()
-            if number.startswith("R"):
-                self._conflicts.append([Conflicts.RESOLVED, int(number[1:]), files])
-            else:
-                self._conflicts.append([Conflicts.UNRESOLVED, int(number), files])
+            result = Conflict.parse(line[:-1], number=len(self._conflicts))
+            if result: self._conflicts.append(result)
         f.close()
 
     def save( self ):
@@ -162,74 +257,70 @@ class Conflicts:
         f.write(str(self))
         f.close()
 
-    def resolved( self ):
+    def resolved( self, number=None ):
         """Returns the list of resolved conflicts"""
-        return tuple(c for c in self._conflicts if c[0] == Conflicts.RESOLVED)
+        if number == None:
+            return tuple(c for c in self._conflicts if c.state == Conflict.RESOLVED)
+        else:
+            res = tuple(c for c in self._conflicts if c.state ==
+            Conflict.RESOLVED and c.number == number)
+            if not res: return None
+            else: return res[0]
 
-    def unresolved( self ):
+    def unresolved( self, number=None):
         """Returns the list of unresolved conflicts"""
-        return tuple(c for c in self._conflicts if c[0] == Conflicts.UNRESOLVED)
+        if number == None:
+            return tuple(c for c in self._conflicts if c.state == Conflict.UNRESOLVED)
+        else:
+            res = tuple(c for c in self._conflicts if c.state ==
+            Conflict.UNRESOLVED and c.number == number)
+            if not res: return None
+            else: return res[0]
 
-    def add( self, original, parent ):
+    def add( self, path, other ):
         """Adds a new conflict between the given files, and returns the conflict
         as a (STATE, ID, FILES) triple."""
-        original = os.path.abspath(original)
-        parent   = os.path.abspath(parent)
-        next     = 0
+        path    = os.path.abspath(path)
+        other   = os.path.abspath(other)
+        next    = 0
         # We do not add a conflict twice
-        conflict = "'%s' '%s'" % (original, parent)
         for c in self._conflicts:
-            if conflict == c[-1]: return c
-            next += 1
+            if  c.path()  != path \
+            and c.other() != other:
+                next += 1
+            else:
+                return c
+        # Eventually adds the conflict
         next     = len(self.unresolved())
-        c = [Conflicts.UNRESOLVED, next + 1, conflict]
-        self._conflicts.append(c)
-        return c
+        conflict = Conflict(next, path)
+        assert other == conflict.other(), "Internal error"
+        self._conflicts.append(conflict)
+        return conflict
 
-    def resolve( self, conflictid ):
-        """Resolve the conflict with the given id. Returns the modified
-        conflict of None if not found."""
-        conflictid = int(conflictid)
-        for conflict in self._conflicts:
-            if conflict[1] == conflictid:
-                conflict[0] = Conflicts.RESOLVED
-                return conflict
-        return None
-
-    def unresolve( self, conflictid ):
-        """Uneesolve the conflict with the given id. Returns the modified
-        conflict of None if not found."""
-        conflictid = int(conflictid)
-        for conflict in self._conflicts:
-            if conflict[1] == conflictid:
-                conflict[0] = Conflicts.UNRESOLVED
-                return conflict
-        return None
-
-    def __str__(self):
+    def asString(self, color=True):
         res = ""
-        u   = c = 0
-        unc = self.unresolved()
-        rec = self.resolved()
+        unresolved       = self.unresolved()
+        resolved         = self.resolved()
         # We handle unresolved conflicts
-        if unc:
-            res += "Unresolved conflicts\n"
-            res += "====================\n"
-            for c in self.unresolved():
-                u += 1 ; res += "%4d:%s\n" % (u, c[2])
-        else:
-            res += "No unresolved conflicts\n"
+        if unresolved:
+            for conflict in unresolved:
+                if color:
+                    res += format(str(conflict), color=RED) + "\n"
+                else:
+                    res += str(conflict) + "\n"
         # And handle resolved conflicts
-        if rec:
-            res += "Resolved conflicts\n"
-            res += "==================\n"
-            r    = 0
-            for c in self.resolved():
-                r += 1 ; res += "%4s:%s\n" % ("R" + str(r), c[2])
-        else:
-            res += "No resolved conflicts\n"
+        if resolved:
+            for conflict in resolved:
+                if color:
+                    res += format(str(conflict), color=GREEN) + "\n"
+                else:
+                    res += str(conflict) + "\n"
         # We remove the trailing EOL
+
         return res[:-1]
+
+    def __str__( self ):
+        return self.asString(color=False)
 
 # -----------------------------------------------------------------------------
 #
@@ -237,51 +328,90 @@ class Conflicts:
 #
 # -----------------------------------------------------------------------------
 
-def add_conflict(root, current, other ):
+
+def add_conflict(root, path, other ):
     """Adds the given conflict to the list of conflicts (stored in a
     '.hgconflicts' file), in the given root directory."""
     conflicts = Conflicts(root)
-    c = conflicts.add(current, other)
+    c = conflicts.add(path, other)
     conflicts.save()
     return c
 
 def list_conflicts(rootdir):
     """Lists the conflicts in the given directory."""
     conflicts = Conflicts(rootdir)
-    print conflicts
+    print conflicts.asString()
+
+def resolve_conflict(rootdir, number, action="merge"):
+    """Resolves the given conflict by merging at first."""
+    conflicts = Conflicts(rootdir)
+    number    = int(number)
+    conflict  = conflicts.unresolved(number)
+    if not conflict:
+        error("No conflict found: %s" % (number))
+        return
+    elif conflict.state == Conflict.RESOLVED:
+        warning("Conflict already resolved. Doing nothing.")
+        return
+    # Resolving the conflict
+    conflict_file = format(conflict.path(),color=RED)
+    if   action == "merge":
+        log("Resolving conflict", conflict_file ,"by",
+        format("manual merging",color=BLUE,  weight=BOLD))
+        os.system("%s %s %s" % (MERGETOOL, conflict.path(), conflict.other()))
+    elif action == "keep":
+        log("Resolving conflict", conflict_file ,"by",
+        format("keeping the file as it is",color=BLUE,  weight=BOLD))
+        pass
+    elif action == "update":
+        log("Resolving conflict", conflict_file, "by",
+        format("using the .other file", color=BLUE, weight=BOLD))
+        shutil.copy(conflict.other(), conflict.path())
+    else:
+        raise Exception("Unknown resolution action: " + action)
+    res = ask("Did you resolve the conflict (y/n) ? ")
+    if res == "y":
+        info("Conflict resolved")
+        conflict.resolve()
+    conflicts.save()
 
 def resolve_conflicts(rootdir, *numbers):
-    """Lists the conflicts in the given directory."""
+    """Resolves the given list of conflicts"""
     conflicts = Conflicts(rootdir)
     numbers   = map(int, numbers)
-    for _, cid, files in conflicts.unresolved():
-        if not numbers or cid in numbers:
-            print "Resolving conflict", cid, "between", files
-            os.system("meld " + files)
-            print "Did you resolve the conflict (y/n) ? ",
-            res = sys.stdin.readline().lower().strip()
-            if res == "y":
-                print "Conflict resolved"
-                conflicts.resolve(cid)
-    conflicts.save()
+    if not numbers:
+       unresolved = conflicts.unresolved()
+       if not unresolved:
+           warning("No conflict to resolve")
+           return
+       for conflict in unresolved:
+        resolve_conflict(rootdir, conflict.number) 
+    else:
+        for number in numbers:
+           resolve_conflict(rootdir, number) 
+
 
 def undo_conflicts(rootdir, *numbers):
     """Undo the given conflicts."""
     conflicts = Conflicts(rootdir)
     numbers   = map(int, numbers)
-    print "NOTE: Undoing conflicts will revert your changes. Use with caution."
-    for state, cid, files in conflicts.resolved():
-        if state == Conflicts.UNRESOLVED: continue
-        if numbers == None or cid in numbers:
-            print "Conflict", cid, files
-            print "Do you want to undo this conflict (y/n) ? ",
-            res = sys.stdin.readline().lower().strip()
-            if res == "y":
-                print "Undoing the resolution"
-                conflicts.unresolve(cid)
-                source = files[1:].find("'")
-                source = files[1:source+1]
-                shutil.copy(source + ".current", source)
+    warning("NOTE: Undoing conflicts will revert your changes on the conflict file.")
+    for number in numbers:
+        conflict = conflicts.resolved(number)
+        if not conflicts:
+            error("No conflict with id: %s" % (number))
+            continue
+        if conflict.state == Conflict.UNRESOLVED:
+            error("Conflict is unresolved, so there is nothing to undo: %s" % (number))
+            continue
+        res = ask("Do you want to undo conflict on %s (y/n) ? " % (conflict.path()))
+        if res == "y":
+            log("Undoing conflict resolution, using %s as original data" % (conflict.current()))
+            conflict.unresolve()
+            shutil.copy(conflict.current(), conflict.path())
+        else:
+            log("Conflict left as it is.")
+
     conflicts.save()
 
 def clean(rootdir):
@@ -304,11 +434,11 @@ def clean(rootdir):
 # MAIN
 #
 # -----------------------------------------------------------------------------
-
+RE_NUMBER = re.compile("\d+")
 def run(args):
     """Runs the command with the given arguments."""
     root = os.path.abspath(os.getcwd())
-    # Command: clean [DIRECTORY]
+    # Command: list [DIRECTORY]
     if len(args) in (1,2) and args[0] == "list":
         if len(args) == 2: root = os.path.abspath(args[1])
         # We list the conflicts in the directory
@@ -316,10 +446,19 @@ def run(args):
         return 0
     # Command: resolve [CONFLICT...]
     elif len(args) >= 1 and args[0] == "resolve":
-        conflicts = ()
-        if len(args) == 1: conflicts = args[1:]
-        # We list the conflicts in the directory
-        resolve_conflicts(root, *conflicts)
+        conflicts = filter(lambda c:RE_NUMBER.match(c), args[1:])
+        if len(conflicts) == 1:
+            conflict = conflicts[0]
+            if   len(args) == 2:
+                resolve_conflict(root, conflict, "merge")
+            elif len(args) == 3:
+                action = args[2].lower()
+                resolve_conflict(root, conflict, action)
+            else:
+                error("resolve expects a list of conflicts, or a conflict and an action")
+        else:
+            # We list the conflicts in the directory
+            resolve_conflicts(root, *conflicts)
         return 0
     # Command: undo CONFLICT...
     elif len(args) >= 2 and args[0] == "undo":
@@ -328,37 +467,55 @@ def run(args):
         undo_conflicts(root, *conflicts)
         return 0
     # Command: clean [DIRECTORY]
-    elif len(args) in (1,2) and args[0] == "clean":
+    elif len(args) in (1,2) and args[0].startswith("clean"):
         # The directory to be cleaned up may be given, so we ensure it is
         # present
         if len(args) == 2: root = os.path.abspath(args[1])
         # We clean the directory
         clean(root)
         return 0
+    # Command: commit
+    elif len(args) == 1 and args[0] == "commit":
+        tip     = os.popen("hg tip").read()
+        success = os.system("hg commit")
+        success = os.popen("hg tip").read() != tip
+        if success:
+            info("Commit successful, cleaning up conflict resolution data.")
+            clean(root)
+            return 0
+        else:
+            info("Commit aborted, nothing done")
+            return -1
     # Command: ORIGINAL PARENT NEWER
     elif len(args) == 3:
+        info("Registering conflict")
         # We prepare the destination paths
         original, parent, other = map(os.path.abspath, args)
         original_copy = original + ".current"
         parent_copy   = original + ".parent"
         other_copy    = original + ".other"
         # We print the conflict
-        _, cid, _ = add_conflict(root, original, other_copy)
-        print "Conflict %4d:" % (cid)
+        conflict = add_conflict(root, original, other_copy)
+        print "Conflict %4d:" % (conflict.number)
         print cutpath(root, original), "[" + str(int(diff_count(original, other))) + "%]"
         print "  parent      ", cutpath(root, parent_copy)
         print "  current     ", cutpath(root, original_copy)
         print "  other       ", cutpath(root, other_copy)
         # We backup .orig, .parent and .new that may already be tehre
-        map(backup_existing, (parent_copy, original_copy, other_copy))
+        try:
+            map(ensure_notexists, (parent_copy, original_copy, other_copy))
+        except Exception, e:
+            error("Previous conflict files present. Please run", PROGRAM_NAME, "clean")
+            return -1
         # And we create the new ones
         shutil.copyfile(original, original_copy)
         shutil.copyfile(parent,   parent_copy)
         shutil.copyfile(other,    other_copy)
+        info("You can resolve conflicts with:", PROGRAM_NAME, "resolve 0 (keep|update|merge)")
         return 0
     else:
         print USAGE
-        return - 1
+        return -1
 
 if __name__ == "__main__":
     sys.exit(run(sys.argv[1:]))
