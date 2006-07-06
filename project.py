@@ -15,6 +15,8 @@ from mercurial.demandload import demandload
 from mercurial.i18n import gettext as _
 demandload(globals(), 'mercurial.ui mercurial.hg os string time')
 
+# TODO: Add default-push for working repositories
+
 # ------------------------------------------------------------------------------
 #
 # TOOLS
