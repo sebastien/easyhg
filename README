@@ -1,52 +1,43 @@
-== Mercurial Project extension
--- Author: SÃ©bastien Pierre
--- Date  : 29-May-2006
+== XPrima Mercurial Extensions
+-- Author: Sébastien Pierre <sebastien@xprima.com>
+-- Version: 1.0
 
-Introduction
-============
+[Mercurial](http://www.selenic.com/mercurial) is an easy to use, versatile,
+distributed revision control system written in the Python language. The
+distributed nature of Mercurial makes it well-suited for open source
+development, but sometimes less easy than other RCS when used in a centralized
+style.
 
-Mercurial can be used in a _centralized_ style, where there is a single location
-for the "main" (central) project repositories, and where each individual
-developer maintain its changes in a local repository, where it pushes and pull
-to the central repository.
+The setup we use at XPrima is as follows:
 
->                         <----------- clone ----------- 
->    [WORKING REPOSITORY] <----------- pull  ----------- [CENTRAL REPOSITORY]
->          (many)         ------------ push  ---------->        (one)
+ - All projects are hosted on a single Linux file server, accessible through
+   Samba and SSH.
+ - Developers have their workspace on the same file server.
+ - Developers work either on Win32 or Linux.
 
-In this case, it is useful to explicitly create a link between the working
-repository and the central repository, and to provide tools to easily check the
-state between both.
+In particular:
 
-Features
-========
+ - We have a `Projects` directory with all projects (in development or retired)
+ - We have a `Home` directory with all developer workspaces (where projects are
+   checked out).
 
-The Mercurial project extension adds support for describing projects in such
-environments:
+The purpose of the _XPrima Mercurial Extensions_ is to fulfill the following
+requirements :
 
-  - A project can be named and described
-  - A project has a number of owners, responsible for the central repository,
-    and a number of developers, having their own "branches"
-  - A working repository for a project inherits the information from the central
-    repository it is bound to.
+ - Add the notion of _central_ and _developer_ repositories
+ - Add per-project meta-information such as description and list of developers
+ - Allow per-project locking of files or directories
+ - Provide tools to ease the resolution of conflicts (when merging)
+ - Provide tools to ensure rich, structured commits
+ - Provide tools to give developers and managers an overview of the development
+   process
 
-The main purpose of the project extension is to have an easy summary of the
-project status:
+In this respect, we offer the following tools:
 
->	hg project
->	Name        : GuestPW (working)
->	Description : Time-based Apache 1.3 authentication module
->	Path        : /home/sebastien/Workspace/GuestPassword
->	Parent      : /home/sebastien/Network/Home/Projects/guestpw
->	Owner       : sebastien@xprima.com
->	Developer   : sebastien@xprima.com
+ - _Easymerge_, which makes merging easier by providing additional
+   functionalities
+ - _Easycommit_, which eases the writing of richer commit messages
+ - _Project_, which adds per-project meta-information and the ability to define
+   central and "development" repositories.
 
-Gives you information on the current project, whether you are in the working or
-central repository, and additional tells you if your repository is :
-
-   - _out of sync_, which means the central repository has changes you do not
-     have in the working repository.
-   - _modified_, which means that the working repository has changes that could
-     be pushed to the central repository
-
-
+# vim: ts=4 tw=80 sw=4 et fenc=latin-1 syn=kiwi

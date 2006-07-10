@@ -1,5 +1,5 @@
 == Mercurial Easymerge
--- Author: SÃ©bastien Pierre <sebastien@xprima.com>
+-- Author: Sébastien Pierre <sebastien@xprima.com>
 -- Version 0.9.0
 
 The [Mercurial](http://www.selenic.com/mercurial) version control system has a
@@ -17,7 +17,7 @@ resolve conflicts that may occur within a merge :
  - Resolution process can be stopped and resumed at will
  - All available revisions for a conflict are made available on the filesystem
 
-Easymerge is available as a `hg-easymerge` command line utility, which has to be
+_Easymerge_ is available as a `hg-easymerge` command line utility, which has to be
 installed by adding the following line in your `~/.hgrc`:
 
 >	merge = hg-easymerge
@@ -65,4 +65,4 @@ these files
 
 >	hg-easymerge clean
 
-# EOF
+# vim: ts=4 sw=4 fenc=latin-1 syn=kiwi et

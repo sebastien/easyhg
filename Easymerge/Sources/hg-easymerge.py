@@ -31,7 +31,7 @@ USAGE = """\
 Commands :
 
     list    [DIRECTORY]                     - list registered conflicts
-    resolve [CONFLICT] [parent|other|merge] - resolves all/given conflict(s)
+    resolve [CONFLICT] [keep|update|merge]  - resolves all/given conflict(s)
     undo    [CONFLICT]                      - undo a resolution
     clean   [DIRECTORY]                     - cleans up the conflict files
     commit                                  - try to commit the changes (TODO)
