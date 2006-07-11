@@ -107,7 +107,7 @@ def Repository_load( path ):
 	"""Creates a Central or a Working repository instance depending on the
 	repository type."""
 	repo = Repository(path)
-	if repo.get("parent"): repo = WorkingRepository(path)
+	if repo.get("parent"): repo = DevelopmentRepository(path)
 	else: repo = CentralRepository(path)
 	return repo
 
@@ -220,7 +220,7 @@ class Repository:
 		return self._repo.changelog.count()
 
 	def changes( self, n=None ):
-		"""Yields the n (10 by default) latest changes in this
+		"""Yields the n (all by default) latest changes in this
 		repository. Each change is returned as (author, date, description, files)"""
 		changes_count = self._repo.changelog.count()
 		if n == None: n = changes_count
@@ -257,7 +257,7 @@ class Repository:
 		elif len(developers) == 1:
 			text += "developer:   " + developers[0] + "\n"
 		else:
-			text += "developers:  " + ", ".join(developers)
+			text += "developers:  " + str(len(developers)) + "\n"
 		return text
 
 	def updateConfig( self ):
@@ -305,13 +305,28 @@ class CentralRepository(Repository):
 			lines.append("children:    %d" % (len(c)))
 		return "\n".join(lines[:-1])
 
+	def qualifiers( self ):
+		"""Returns a list of qualifiers that describe the state of the central
+		project relatively to the children repositories."""
+		qualifiers = {}
+		last_change = self.changes(1)
+		cauthor, ctime, cdate, desc, cfiles = last_change
+		for child_repo_path in self.children():
+			child_repo = Repository_load(child_repo_path)
+			other_change = child_repo.change(1)
+			if other_change[1] > ctime:
+				qualifiers["incoming change"] = True
+			# TODO: Add branch detection
+			# TODO: Add local changes detection
+		return qualifiers.keys()
+
 # ------------------------------------------------------------------------------
 #
-# WORKING PROJECT
+# DEVELOPMENT REPOSITORY
 #
 # ------------------------------------------------------------------------------
 
-class WorkingRepository(Repository):
+class DevelopmentRepository(Repository):
 	
 	def __init__(self, path, config=None):
 		Repository.__init__(self, path)
@@ -324,7 +339,7 @@ class WorkingRepository(Repository):
 		return self.parent().description()
 
 	def type(self):
-		return "working"
+		return "development"
 
 	def parent(self):
 		if not self._parent:
@@ -348,12 +363,30 @@ class WorkingRepository(Repository):
 		"""Returns a text summary of this repository"""
 		lines = list(Repository.summary(self).split("\n"))
 		meta  = [self.type()]
+		meta.extend(self.qualifiers())
 		if not self.isSynchronized(): meta.append("out of sync")
 		if self.isModified(): meta.append("modified")
 		lines[0] = "name:        %s (%s)" % (self.name(), ", ".join(meta))
 		lines.insert(3, "parent:      " + self._parent._path)
 		return "\n".join(lines)
 
+	def qualifiers( self ):
+		"""Returns a list of qualifiers that describe the state of the central
+		project relatively to the children repositories."""
+		qualifiers         = {}
+		last_change        = tuple(self.parent().changes(1))[0]
+		parent_last_change = tuple(self.parent().changes(1))[0]
+		cauthor, ctime, cdate, desc, cfiles = last_change
+		if last_change == parent_last_change:
+			qualifiers["up to date"] = True
+			return qualifiers
+		elif last_change[1] < parent_last_change[1]:
+			qualifiers["out of date"] = True
+		elif last_change[1] > parent_last_change[1]:
+			qualifiers["outgoing change"] = True
+		else:
+			qualifiers["up to date"] = True
+		return qualifiers.keys()
 # ------------------------------------------------------------------------------
 #
 # COMMANDS
@@ -364,16 +397,16 @@ HELP = """\
 project [info|parent|clone]
 
    Enables easy management of repositories for projects with a central
-   repository and many working repositories related to it.
+   repository and many development repositories related to it.
 
    A central repository can be given a 'name' and a 'description', and each
-   working repository can be related to by setting the 'parent' property to
+   development repository can be related to by setting the 'parent' property to
    point to the central repository.
 
 project info [property=value...]
 
     Displays a summary of the project, and telling wether the current repository
-    is the central or a working directory. If arguments are given, properties
+    is the central or a development directory. If arguments are given, properties
     can be modified in the project configuration (.hg/hgrc, [project] section).
 
     Supported properties for Central repositories:
@@ -386,10 +419,15 @@ project info [property=value...]
 
         parent        = path to the parent repository
 
-project parent [LOCATION]
+project status
+
+    Displays the status of this repository. This will tell you if there are
+    incoming or outgoing changes.
+
+project parent [COMMAND|LOCATION]
 
     Displays information on this repository parent (only works if
-    current repository is a working repository). If a location is given, the
+    current repository is a development repository). If a location is given, the
     repository parent is set and the repository becomes a workinf repository.
 
 project children
@@ -400,7 +438,7 @@ project children
 project clone LOCATION
 
     Clones the central repository for this project to the given location. The
-    clone will be a working repository for the project.
+    clone will be a development repository for the project.
 
 """ 
 
@@ -456,7 +494,7 @@ class Commands:
 		# mercurial.commands.clone(ui, ".", destination)
 		# TODO: Should use mercurial.commands once opts problem is fixed
 		os.system("hg clone '%s' '%s'" % (Repository_locate("."), destination))
-		repo_clone = WorkingRepository(destination)
+		repo_clone = DevelopmentRepository(destination)
 		repo_clone.set("parent", repo.path())
 		repo_clone.updateConfig()
 
