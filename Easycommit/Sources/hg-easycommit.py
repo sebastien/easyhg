@@ -11,7 +11,7 @@
 # Last mod  : 13-Jul-2006
 # -----------------------------------------------------------------------------
 
-import sys, os, re, time, stat
+import sys, os, re, time, stat, tempfile
 
 try:
 	from mercurial.demandload import demandload
@@ -57,9 +57,12 @@ class Event:
 		self.parent = parent
 		self._cache_info = None
 
+	def parentRevision( self ):
+		return None
+
 	def abspath( self ):
 		"""Returns the absolute path for this event."""
-		return os.path.join(self.path, self.parent.repo.path)
+		return os.path.join(os.path.dirname(self.parent.repo.path), self.path)
 
 	def info( self ):
 		"""Returns additional info on the event."""
@@ -74,6 +77,9 @@ class ChangeEvent( Event ):
 	def __init__( self, parent, path ):
 		Event.__init__(self, parent, Event.CHANGE, path)
 
+	def parentRevision( self ):
+		return self.parent.hg("cat -r%s '%s'" % (self.parent.parent(), self.abspath()))
+		
 	def info( self ):
 		"""Returns the diffstat information"""
 		if self._cache_info: return self._cache_info
@@ -130,6 +136,14 @@ class Commit:
 		os.chdir(cwd)
 		return res
 
+	def hg( self, command ):
+		return self.commandInRepo("hg " + command)
+
+	def parent( self ):
+		"""Returns the local parent revision number."""
+		parent = self.hg("parent").split("\n")[0].split(":")[1].strip()
+		return parent
+
 	def __str__( self ):
 		return str(self.events)
 
@@ -139,7 +153,6 @@ class Commit:
 #
 # ------------------------------------------------------------------------------
 
-RE_NOTEOL = re.compile("[^\n]")
 BLANK     = urwid.Text("")
 
 def CLASS(c,f):
@@ -154,8 +167,8 @@ def isKey( key ):
 COMMIT_STATES            = ["WIP", "UNSTABLE", "STABLE", "RELEASE"]
 COMMIT_TYPES             = ["Feature", "Bugfix", "Refactor"]
 
-TOOLTIP_EDIT_STATE       = "LEFT or RIGHT to select a project state: %s" % (" ".join(COMMIT_STATES))
-TOOLTIP_EDIT_TYPE        = "LEFT or RIGHT to select a commit type: %s" % (" ".join(COMMIT_TYPES))
+TOOLTIP_EDIT_STATE       = "LEFT/- or RIGHT/+ to select a project state: %s" % (" ".join(COMMIT_STATES))
+TOOLTIP_EDIT_TYPE        = "LEFT/- or RIGHT/+ to select a commit type: %s" % (" ".join(COMMIT_TYPES))
 TOOLTIP_EDIT_SUMMARY     = ""
 TOOLTIP_EDIT_DESCRIPTION = ""
 
@@ -176,7 +189,8 @@ class CommitEditor:
 	PALETTE = [
 		('background',         'dark gray',    'default',    'standout'),
 		('header',             'white',        'dark cyan',  'bold'),
-		('footer',             'white',    'dark magenta',  'standout'),
+		('footer',             'light gray',    'default',  'standout'),
+		('info',               'white',        'light gray',  'bold'),
 		('shade',              'dark cyan',    'light gray',  'bold'),
 		('label',              'light gray',   'default',    'standout'),
 		('divider',            'light gray',   'default',    'standout'),
@@ -240,11 +254,10 @@ class CommitEditor:
 		widgets = []
 		# Function invoked when focusing a checkbox
 		def on_focus(c):
-			info = c.commitEvent.info()
-			if info: self.footer(info)
+			text = c.commitEvent.info()
+			if text: self.footer(text=text, info="[v] Review differences")
 		# Iterates on evnets and registers checkboxes
 		for event in self.commit.events:
-			stat = os.stat(event.path)
 			checkbox = urwid.CheckBox("%-10s %s" %(event.name, event.path), state=True)
 			checkbox.commitEvent = event
 			checkbox.onFocus     = on_focus
@@ -269,9 +282,7 @@ class CommitEditor:
 			if isinstance(focused, urwid.Pile):     focused = focused.get_focus()
 			# These are URWID extensions to manage tooltip and onFocus
 			if hasattr(focused, "tooltip") and focused.tooltip:
-				self.footer(focused.tooltip)
-			else:
-				self.footer("")
+				self.footer(info=focused.tooltip)
 			if hasattr(focused, "onFocus"):
 				focused.onFocus(focused)
 			# We handle keys
@@ -281,7 +292,19 @@ class CommitEditor:
 				if k == "window resize":
 					size = self.ui.get_cols_rows()
 					continue
-				self.frame.keypress( size, k )
+				if focused and k == 'v':
+					self.reviewFile(focused.commitEvent)
+				else:
+					self.frame.keypress( size, k )
+
+	def reviewFile( self, commitEvent ):
+		parent_rev = commitEvent.parentRevision()
+		fd, path   = tempfile.mkstemp(prefix="hg-easycommit")
+		os.write(fd, parent_rev)
+		self.footer("Reviewing differences for " + commitEvent.path)
+		os.popen("gview -df '%s' '%s'" % (commitEvent.abspath(), path)).read()
+		os.close(fd)
+		os.unlink(path)
 
 	def cancel( self, e ):
 		self.footer("Cancel")
@@ -294,13 +317,12 @@ class CommitEditor:
 
 	def keypress(self, size, k):
 		pass
-	
-	def footer( self, text, *args ):
-		if args: text = str(text) + " " + " ".join(map(str, args))
-		if not text:
-			self.frame.footer = None
-		else:
-			self.frame.footer = CLASS('footer',urwid.Text(text))
+
+	def footer( self, text=None, info=None ):
+		content = []
+		if text: content.append(CLASS('footer',urwid.Text(text)))
+		if info: content.append(CLASS('info',  urwid.Text(info)))
+		self.frame.footer = urwid.Pile(content)
 
 	def draw_screen(self, size):
 		canvas = self.frame.render( size, focus=True )
@@ -331,15 +353,19 @@ class CommitEditor:
 	def onEditSummary( self, size, key ):
 		if not isKey(key) \
 		and self.edit_summary.get_edit_text() == DEFAULT_EDIT_SUMMARY:
-			self.edit_summary.set_edit_text(RE_NOTEOL.sub(" ", DEFAULT_EDIT_SUMMARY))
+			self.edit_summary.set_edit_text("")
 		return self.edit_summary.__class__.keypress( self.edit_summary, size, key) 
 
 	def onEditDescription( self, size, key ):
 		if not isKey(key) \
 		and self.edit_description.get_edit_text() == DEFAULT_EDIT_DESCRIPTION:
-			self.edit_description.set_edit_text(RE_NOTEOL.sub("", DEFAULT_EDIT_DESCRIPTION))
-		return self.edit_description.__class__.keypress( self.edit_description, size, key) 
-
+			self.edit_description.set_edit_text("")
+		res  = self.edit_description.__class__.keypress( self.edit_description, size, key) 
+		text = self.edit_description.get_edit_text()
+		while text[-1] == "\n" and len(text) >2 and text[-2] == "\n": text = text[:-1]
+		while text.count("\n") < 6: text += "\n"
+		text = self.edit_description.set_edit_text(text)
+		return res
 
 # ------------------------------------------------------------------------------
 #
@@ -370,10 +396,13 @@ def commit_wrapper(repo, files=None, text="", user=None, date=None,
 	for c in changed: commit_object.events.append(ChangeEvent(commit_object, c))
 	for c in added:   commit_object.events.append(AddEvent(commit_object, c))
 	for c in removed: commit_object.events.append(RemoveEvent(commit_object, c))
-	# And we invoke the commit editor
-	CommitEditor().main(commit_object)
-	# Now we execute the old commit method
-	#repo._old_commit( files, text, user, date, match, force, lock, wlock, force_editor )
+	if commit_object.events:
+		# And we invoke the commit editor
+		CommitEditor().main(commit_object)
+		# Now we execute the old commit method
+		#repo._old_commit( files, text, user, date, match, force, lock, wlock, force_editor )
+	else:
+		print "No changes: nothing to commit"
 
 def command_defaults(cmd):
 	"""Returns the default option values for the given Mercurial command. This
