@@ -6,11 +6,20 @@
 # -----------------------------------------------------------------------------
 # Author    : Sebastien Pierre                           <sebastien@xprima.com>
 # License   : GNU Public License         <http://www.gnu.org/licenses/gpl.html>
+# -----------------------------------------------------------------------------
 # Creation  : 10-Jul-2006
 # Last mod  : 13-Jul-2006
 # -----------------------------------------------------------------------------
 
-import sys, os, re
+import sys, os, re, time, stat
+
+try:
+	from mercurial.demandload import demandload
+	from mercurial.i18n import gettext as _
+except:
+	print "Failed to load Mercurial modules."
+	sys.exit(-1)
+
 try:
 	import urwid
 	import urwid.curses_display
@@ -19,6 +28,7 @@ except:
 	"http://excess.org/urwid/")
 	sys.exit(-1)
 
+demandload(globals(), 'mercurial.ui mercurial.util mercurial.commands mercurial.localrepo')
 
 __version__ = "0.1.0"
 __doc__     = """\
@@ -26,24 +36,120 @@ Easycommit is a tool that allows better, richer, more structured commits for
 Mercurial. It eases the life of the developers and enhances the quality and
 consistency of commits.
 """
+# ------------------------------------------------------------------------------
+#
+# EVENTS
+#
+# ------------------------------------------------------------------------------
 
-RE_NOTEOL = re.compile("[^\n]")
-BLANK     = urwid.Text("")
+class Event:
+	"""Abstract interface to events that occured while last commit, and related
+	in a commit log."""
 
-def CLASS(c,f):
-	if c.upper() in map(lambda x:x[0], CommandLineUI.PALETTE):
-		return urwid.AttrWrap(f,c,c.upper())
-	else:
-		return urwid.AttrWrap(f,c)
+	CHANGE = "Changed"
+	ADD    = "Added"
+	REMOVE = "Removed"
 
-def isKey( key ):
-	return key in ("left", "right", "up", "down")
+	def __init__( self, parent, name, path ):
+		"""Creates a new event with the given name and path"""
+		self.name   = name
+		self.path   = path
+		self.parent = parent
+		self._cache_info = None
+
+	def abspath( self ):
+		"""Returns the absolute path for this event."""
+		return os.path.join(self.path, self.parent.repo.path)
+
+	def info( self ):
+		"""Returns additional info on the event."""
+		return None
+
+	def __repr__( self ):
+		return "<Event:%s='%s'>" % (self.name, self.path)
+
+class ChangeEvent( Event ):
+	"""A Change event"""
+
+	def __init__( self, parent, path ):
+		Event.__init__(self, parent, Event.CHANGE, path)
+
+	def info( self ):
+		"""Returns the diffstat information"""
+		if self._cache_info: return self._cache_info
+		info = self.parent.commandInRepo("hg diff '%s' | diffstat" % (self.path))
+		if info[-1] == "\n": info = info[:-1]
+		self._cache_info = info
+		return self._cache_info
+
+class AddEvent( Event ):
+	"""A Add event"""
+
+	def __init__( self, parent, path ):
+		Event.__init__(self, parent, Event.ADD, path)
+
+	def info( self ):
+		"""Returns the diffstat information"""
+		if self._cache_info: return self._cache_info
+		st = os.stat(self.abspath())
+		st_size  = float(st[stat.ST_SIZE]) / 1024
+		st_mtime = time.ctime(st[stat.ST_MTIME])
+		info = " %s\n %skb, last modified %s" % (
+			os.path.basename(self.path),
+			st_size,
+			st_mtime
+		)
+		self._cache_info = info
+		return self._cache_info
+
+class RemoveEvent( Event ):
+	"""A Remove event"""
+
+	def __init__( self, parent, path ):
+		Event.__init__(self, parent, Event.REMOVE, path)
+
+# ------------------------------------------------------------------------------
+#
+# COMMIT OBJECT
+#
+# ------------------------------------------------------------------------------
+
+class Commit:
+	"""A Commit object contains useful information about a Mercurial commit."""
+
+	def __init__( self, repo ):
+		self.events = []
+		self.repo   = repo
+
+	def commandInRepo( self, command ):
+		"""Executes the given command within the repository, and returns its
+		result."""
+		cwd = os.getcwd()
+		os.chdir(os.path.dirname(self.repo.path))
+		res = os.popen(command).read()
+		os.chdir(cwd)
+		return res
+
+	def __str__( self ):
+		return str(self.events)
 
 # ------------------------------------------------------------------------------
 #
 # CURSES INTERFACE
 #
 # ------------------------------------------------------------------------------
+
+RE_NOTEOL = re.compile("[^\n]")
+BLANK     = urwid.Text("")
+
+def CLASS(c,f):
+	if c.upper() in map(lambda x:x[0], CommitEditor.PALETTE):
+		return urwid.AttrWrap(f,c,c.upper())
+	else:
+		return urwid.AttrWrap(f,c)
+
+def isKey( key ):
+	return key in ("left", "right", "up", "down")
 
 COMMIT_STATES            = ["WIP", "UNSTABLE", "STABLE", "RELEASE"]
 COMMIT_TYPES             = ["Feature", "Bugfix", "Refactor"]
@@ -65,8 +171,7 @@ A longer description, where you can give a list of what you changed:
 - Changed that
 """
 
-
-class CommandLineUI:
+class CommitEditor:
 
 	PALETTE = [
 		('background',         'dark gray',    'default',    'standout'),
@@ -133,15 +238,22 @@ class CommandLineUI:
 	def updateCommitFiles(self):
 		assert self.commit
 		widgets = []
+		# Function invoked when focusing a checkbox
+		def on_focus(c):
+			info = c.commitEvent.info()
+			if info: self.footer(info)
+		# Iterates on evnets and registers checkboxes
 		for event in self.commit.events:
 			stat = os.stat(event.path)
-			widgets.append(CLASS("checkbox", urwid.CheckBox("%-10s %s"
-			%(event.name, event.path))))
+			checkbox = urwid.CheckBox("%-10s %s" %(event.name, event.path), state=True)
+			checkbox.commitEvent = event
+			checkbox.onFocus     = on_focus
+			widgets.append(CLASS("checkbox", checkbox))
 		self.pile_commitFiles.widget_list = widgets
 		self.pile_commitFiles.set_focus(0)
 
-	def main(self, args=()):
-		if args: self.commit = Commit.fromFile(args[0])
+	def main(self, commit ):
+		self.commit = commit
 		self.updateCommitFiles()
 		self.ui = urwid.curses_display.Screen()
 		self.ui.register_palette(self.PALETTE)
@@ -151,16 +263,18 @@ class CommandLineUI:
 		size = self.currentSize = self.ui.get_cols_rows()
 		while True:
 			self.draw_screen( self.currentSize )
-			keys = self.ui.get_input()
+			keys    = self.ui.get_input()
 			focused = self.listbox.get_focus()[0]
 			if isinstance(focused, urwid.AttrWrap): focused = focused.w
+			if isinstance(focused, urwid.Pile):     focused = focused.get_focus()
+			# These are URWID extensions to manage tooltip and onFocus
 			if hasattr(focused, "tooltip") and focused.tooltip:
 				self.footer(focused.tooltip)
-			if hasattr(focused, "onFocus"):
-				focused.onFocus(focused)
 			else:
 				self.footer("")
-
+			if hasattr(focused, "onFocus"):
+				focused.onFocus(focused)
+			# We handle keys
 			if "f1" in keys:
 				break
 			for k in keys:
@@ -196,7 +310,7 @@ class CommandLineUI:
 		i = COMMIT_STATES.index(self.edit_state.get_edit_text())
 		if key == "left" or key == "-":
 			i = ( i-1 ) % (len(COMMIT_STATES))
-			self.edit_type.set_edit_text(COMMIT_TYPES[i])
+			self.edit_state.set_edit_text(COMMIT_STATES[i])
 		elif key == "right" or key == "+":
 			i = ( i+1 ) % (len(COMMIT_STATES))
 			self.edit_state.set_edit_text(COMMIT_STATES[i])
@@ -226,83 +340,69 @@ class CommandLineUI:
 			self.edit_description.set_edit_text(RE_NOTEOL.sub("", DEFAULT_EDIT_DESCRIPTION))
 		return self.edit_description.__class__.keypress( self.edit_description, size, key) 
 
+
 # ------------------------------------------------------------------------------
 #
-# EVENTS
+# MERCURIAL COMMAND REGISTRATION
 #
 # ------------------------------------------------------------------------------
 
-class Event:
-	"""Abstract interface to events that occured while last commit, and related
-	in a commit log."""
+def commit_wrapper(repo, files=None, text="", user=None, date=None,
+    match=mercurial.util.always, force=False, lock=None, wlock=None,
+    force_editor=False):
+	"""Replacement for the localrepository commit that intercepts the list of
+	changes. This function takes care of firing the """
+	assert isinstance(repo, mercurial.localrepo.localrepository),\
+	"Easycommit only works with local repositories (for now)"
+	# The following is adapted from localrepo.py (commit function)
+	# ---------------------------------------------------------------------------
+	added     = []
+	removed   = []
+	deleted   = []
+	changed   = []
+	if files:
+		raise Exception("Explicit files are not supported right now.")
+	else:
+		changed, added, removed, deleted, unknown = repo.changes(match=match)
+	# ---------------------------------------------------------------------------
+	# We create a commit object that sums up the information
+	commit_object = Commit(repo)
+	for c in changed: commit_object.events.append(ChangeEvent(commit_object, c))
+	for c in added:   commit_object.events.append(AddEvent(commit_object, c))
+	for c in removed: commit_object.events.append(RemoveEvent(commit_object, c))
+	# And we invoke the commit editor
+	CommitEditor().main(commit_object)
+	# Now we execute the old commit method
+	#repo._old_commit( files, text, user, date, match, force, lock, wlock, force_editor )
 
-	CHANGE = "Changed"
-	ADD    = "Added"
-	REMOVE = "Removed"
+def command_defaults(cmd):
+	"""Returns the default option values for the given Mercurial command. This
+	was taken from the Tailor conversion script."""
+	if hasattr(mercurial.commands, 'findcmd'):
+		findcmd = mercurial.commands.findcmd
+	else:
+		findcmd = mercurial.commands.find
+	return dict([(f[1].replace('-', '_'), f[2]) for f in findcmd(cmd)[1][1]])
 
-	def __init__( self, name, path ):
-		"""Creates a new event with the given name and path"""
-		self.name = name
-		self.path = path
+def command_main( ui, repo, *args, **opts ):
+	# Here we swap the default commit implementation with ours
+	repo_old_commit            = repo.__class__.commit
+	repo.__class__.commit      = commit_wrapper
+	repo.__class__._old_commit = repo_old_commit
+	# Sets the default commit options
+	for key, value in COMMIT_DEFAULTS.items():
+		if not opts.has_key(key): opts[key] = value
+	# Restores the commit implementation
+	mercurial.commands.commit(ui, repo, *args, **opts)
+	repo.__class__.commit  = repo_old_commit
+	del repo.__class__._old_commit
 
-class ChangeEvent( Event ):
-	"""A Change event"""
-
-	def __init__( self, path ):
-		Event.__init__(self, Event.CHANGE, path)
-
-	def __repr__( self ):
-		return "<Event:%s='%s'>" % (self.name, self.path)
-
-class AddEvent( Event ):
-	"""A Add event"""
-
-	def __init__( self, path ):
-		Event.__init__(self, Event.ADD, path)
-
-class RemoveEvent( Event ):
-	"""A Remove event"""
-
-	def __init__( self, path ):
-		Event.__init__(self, Event.REMOVE, path)
-
-EVENTS_BY_NAME = {
-	"changed":ChangeEvent,
-	"removed":RemoveEvent,
-	"added"  :AddEvent,
+# This stores the Mercurial commit defaults, that will be used by the
+# command_main
+COMMIT_DEFAULTS = command_defaults("commit")
+cmdtable = {
+	"commit": ( command_main, [], 'hg commit', "FOU" )
 }
-
-# ------------------------------------------------------------------------------
-#
-# COMMIT OBJECT
-#
-# ------------------------------------------------------------------------------
-
-class Commit:
-	"""A Commit object contains useful information about a Mercurial commit."""
-
-	RE_LINE = re.compile("^HG: (\w+) (.+)$")
-
-	def __init__( self ):
-		self.events = []
-	
-	@staticmethod
-	def fromFile( path ):
-		"""Creates a commit instance from the commit log at the given path."""
-		commit      = Commit()
-		commit_file = file(path, 'r')
-		for line in commit_file:
-			match = Commit.RE_LINE.match(line)
-			if not match: continue
-			operation, path = match.groups()
-			if not operation in EVENTS_BY_NAME.keys():
-				raise Exception("Unknown commit operation: " +operation)
-			commit.events.append(EVENTS_BY_NAME[operation](path))
-		commit_file.close()
-		return commit
-
-	def __str__( self ):
-		return str(self.events)
 
 # ------------------------------------------------------------------------------
 #
@@ -311,6 +411,6 @@ class Commit:
 # ------------------------------------------------------------------------------
 
 if __name__ == "__main__":
-	CommandLineUI().main(sys.argv[1:])
+	CommitEditor().main(Commit())
 
 # EOF
