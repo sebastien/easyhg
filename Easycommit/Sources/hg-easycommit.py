@@ -4,11 +4,11 @@
 # -----------------------------------------------------------------------------
 # Project   : Mercurial - Easycommit
 # -----------------------------------------------------------------------------
-# Author    : Sebastien Pierre                           <sebastien@xprima.com>
+# Author    : Sébastien Pierre                           <sebastien@xprima.com>
 # License   : GNU Public License         <http://www.gnu.org/licenses/gpl.html>
 # -----------------------------------------------------------------------------
 # Creation  : 10-Jul-2006
-# Last mod  : 13-Jul-2006
+# Last mod  : 14-Jul-2006
 # -----------------------------------------------------------------------------
 
 import sys, os, re, time, stat, tempfile
@@ -195,6 +195,8 @@ class CommitEditor:
 		('label',              'light gray',   'default',    'standout'),
 		('divider',            'light gray',   'default',    'standout'),
 		('edit',               'black',        'default',    'bold'),
+		('summary',            'dark magenta',  'default',    'standout'),
+		('SUMMARY',            'dark magenta',  'light gray',    'standout'),
 		('EDIT',               'dark magenta', 'light gray', 'bold'),
 		('text',               'black',        'default',    'bold'),
 		('TEXT',               'dark blue',    'light gray', 'bold'),
@@ -202,6 +204,7 @@ class CommitEditor:
 		('CHECKBOX',           'dark magenta', 'light gray', 'bold'),
 		('button',             'white',        'dark cyan',  'bold'),
 		('BUTTON',             'white',        'dark magenta',  'bold'),
+		('dialog',             'yellow',        'dark blue',  'bold'),
 	]
 
 	def __init__(self):
@@ -229,7 +232,7 @@ class CommitEditor:
 			BLANK,
 			CLASS('edit', self.edit_state),
 			CLASS('edit', self.edit_type),
-			CLASS('edit', self.edit_summary),
+			CLASS('summary', self.edit_summary),
 			CLASS('divider', urwid.Divider("-")),
 			CLASS('text', self.edit_description),
 			CLASS('divider', urwid.Divider("=")),
@@ -247,6 +250,8 @@ class CommitEditor:
 		header       = urwid.AttrWrap( instruct, 'header' )
 		self.listbox = urwid.ListBox(self.content)
 		self.frame   = urwid.Frame(self.listbox, header)
+		# self.topwidget = urwid.Overlay( self.dialog(), self.frame, 'center', 40, 'middle', 10)
+		self.topwidget = self.frame
 		urwid.AttrWrap(self.frame, 'background')
 
 	def updateCommitFiles(self):
@@ -275,16 +280,17 @@ class CommitEditor:
 	def run(self):
 		size = self.currentSize = self.ui.get_cols_rows()
 		while True:
-			self.draw_screen( self.currentSize )
-			keys    = self.ui.get_input()
 			focused = self.listbox.get_focus()[0]
 			if isinstance(focused, urwid.AttrWrap): focused = focused.w
 			if isinstance(focused, urwid.Pile):     focused = focused.get_focus()
 			# These are URWID extensions to manage tooltip and onFocus
+			self.footer()
 			if hasattr(focused, "tooltip") and focused.tooltip:
 				self.footer(info=focused.tooltip)
 			if hasattr(focused, "onFocus"):
 				focused.onFocus(focused)
+			self.draw_screen( self.currentSize )
+			keys    = self.ui.get_input()
 			# We handle keys
 			if "f1" in keys:
 				break
@@ -295,7 +301,7 @@ class CommitEditor:
 				if focused and k == 'v':
 					self.reviewFile(focused.commitEvent)
 				else:
-					self.frame.keypress( size, k )
+					self.topwidget.keypress( size, k )
 
 	def reviewFile( self, commitEvent ):
 		parent_rev = commitEvent.parentRevision()
@@ -322,10 +328,23 @@ class CommitEditor:
 		content = []
 		if text: content.append(CLASS('footer',urwid.Text(text)))
 		if info: content.append(CLASS('info',  urwid.Text(info)))
-		self.frame.footer = urwid.Pile(content)
+		if not content:
+			self.frame.footer = None
+		else:
+			self.frame.footer = urwid.Pile(content)
+
+	def dialog( self, message="HELLO" ):
+		dialog = CLASS("dialog", urwid.ListBox([
+			urwid.Text("TITLE"),
+			urwid.Divider("="),
+			urwid.Text("Pouet"),
+			urwid.Button("Pouet", lambda x:x),
+			urwid.Button("Pouet", lambda x:x)
+		]))
+		return dialog
 
 	def draw_screen(self, size):
-		canvas = self.frame.render( size, focus=True )
+		canvas = self.topwidget.render( size, focus=True )
 		self.ui.draw_screen( size, canvas )
 	
 	def onEditState( self, size, key ):
@@ -362,7 +381,7 @@ class CommitEditor:
 			self.edit_description.set_edit_text("")
 		res  = self.edit_description.__class__.keypress( self.edit_description, size, key) 
 		text = self.edit_description.get_edit_text()
-		while text[-1] == "\n" and len(text) >2 and text[-2] == "\n": text = text[:-1]
+		while len(text) > 1 and text[-1] == "\n" and text[-2] == "\n": text = text[:-1]
 		while text.count("\n") < 6: text += "\n"
 		text = self.edit_description.set_edit_text(text)
 		return res
