@@ -1,16 +1,21 @@
 #!/usr/bin/env python
 # Encoding: iso-8859-1
-# vim: tw=80 ts=4 sw=4 et
+# vim: tw=80 ts=4 sw=4 et fenc=latin-1
 # -----------------------------------------------------------------------------
 # Project   : Mercurial - SVN-like merging tool
 # -----------------------------------------------------------------------------
 # Author    : Sebastien Pierre                           <sebastien@xprima.com>
 # License   : GNU Public License         <http://www.gnu.org/licenses/gpl.html>
+# -----------------------------------------------------------------------------
 # Creation  : 05-May-2006
-# Last mod  : 06-Jul-2006
+# Last mod  : 17-Jul-2006
 # -----------------------------------------------------------------------------
 
 import os, sys, re, shutil, difflib, stat
+try:
+    import urwide, urwid
+except:
+    urwide = None
 
 __version__ = "0.9.0"
 PROGRAM_NAME = os.path.splitext(os.path.basename(__file__))[0]
@@ -160,6 +165,97 @@ def diff_count( a, b ):
 
 # -----------------------------------------------------------------------------
 #
+# UI
+#
+# -----------------------------------------------------------------------------
+
+CONSOLE_STYLE = """\
+Frame         : Dg,  _, SO
+header        : WH, DC, BO
+footer        : LG,  _, SO
+info          : WH, Lg, BO
+tooltip       : Lg,  _, SO
+shade         : DC, Lg, BO
+
+label         : Lg,  _, SO
+
+resolved      : DG,  _, SO
+unresolved    : LR,  _, SO
+
+Edit          : BL,  _, BO
+Edit*         : DM, Lg, BO
+Button        : WH, DC, BO
+Button*       : WH, DM, BO
+Divider       : Lg,  _, SO
+Text      : BL,  _, SO
+Text*     : DM, Lg, BO
+
+#edit_summary : DM,  _, SO
+"""
+
+CONSOLE_UI = """\
+Hdr MERCURIAL - Easymerge %s
+::: @shade
+
+Txt  Unresolved conflicts
+Txt  --------------------
+Ple                                 #unresolved
+End
+---
+Txt  Resolved conflicts
+Txt  ------------------
+Ple                                 #resolved
+End
+===
+GFl
+Btn  [Quit]
+End
+""" % (__version__)
+
+class ConsoleUI(urwide.Handler):
+    """Main user interface for easymerge."""
+
+    def __init__(self, conflicts):
+        urwide.Handler.__init__(self)
+        self.ui = urwide.UI()
+        self.ui.handler(self)
+        self.ui.data.conflicts = conflicts
+        self.ui.strings.RESOLVED   = "[U]ndo [V]iew"
+        self.ui.strings.UNRESOLVED = "[R]esolve [U]pdate [K]eep [V]iew"
+
+    def main( self ):
+        self.ui.parse(CONSOLE_STYLE, CONSOLE_UI)
+        self.updateConflicts()
+        self.ui.main()
+
+    def updateConflicts( self ):
+        resolved   = self.ui.widgets.resolved
+        unresolved = self.ui.widgets.unresolved
+        resolved.remove_widgets()
+        unresolved.remove_widgets()
+        # Unresolved
+        for c in self.ui.data.conflicts.unresolved():
+            conflict = self.ui.new(urwid.Edit, str(c))
+            unresolved.add_widget(self.ui.wrap(conflict, "@unresolved &key=resolve ?UNRESOLVED"))
+            conflict.conflict = c
+        if unresolved.widget_list: unresolved.set_focus(0)
+        else: unresolved.add_widget(self.ui.new(urwid.Text, "   All conflicts resolved!"))
+        # Resolved
+        for c in self.ui.data.conflicts.resolved():
+            conflict = self.ui.new(urwid.Edit, str(c))
+            resolved.add_widget(self.ui.wrap(conflict, "@resolved &key=undo ?RESOLVED"))
+            conflict.conflict = c
+        if resolved.widget_list: resolved.set_focus(0)
+        else: resolved.add_widget(self.ui.new(urwid.Text, "   No resolved conflict"))
+
+    def onResolve( self, widget, key ):
+        if key in ("up", "down"): return False
+        if key == "r":
+            resolve_conflict( self.ui.data.conflicts.root, widget.conflict.number)
+
+
+# -----------------------------------------------------------------------------
+#
 # CONFLICTS CLASS
 #
 # -----------------------------------------------------------------------------
@@ -226,9 +322,9 @@ class Conflicts:
     whether they are resolved or not. It is used by all commands, and makes it
     easy to manage the conflicts file."""
 
-    def __init__( self, path ):
+    def __init__( self, path="." ):
         # We look for the parent directory where the conflicts file is located
-        search_path = path = os.path.abspath(path)
+        search_path = path = self.root = os.path.abspath(path)
         last_path   = None
         while search_path != last_path:
             conflicts_path = os.path.join(search_path, CONFLICTS_FILE)
@@ -332,7 +428,6 @@ class Conflicts:
 # COMMANDS
 #
 # -----------------------------------------------------------------------------
-
 
 def add_conflict(root, path, other ):
     """Adds the given conflict to the list of conflicts (stored in a
@@ -438,9 +533,14 @@ def clean(rootdir):
 # MAIN
 #
 # -----------------------------------------------------------------------------
+
 RE_NUMBER = re.compile("\d+")
 def run(args):
     """Runs the command with the given arguments."""
+    if not args and urwide:
+        ui = ConsoleUI(Conflicts())
+        ui.main()
+        return 0
     root = os.path.abspath(os.getcwd())
     # Command: list [DIRECTORY]
     if len(args) in (1,2) and args[0] == "list":
