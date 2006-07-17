@@ -8,24 +8,17 @@
 # License   : GNU Public License         <http://www.gnu.org/licenses/gpl.html>
 # -----------------------------------------------------------------------------
 # Creation  : 10-Jul-2006
-# Last mod  : 14-Jul-2006
+# Last mod  : 15-Jul-2006
 # -----------------------------------------------------------------------------
 
 import sys, os, re, time, stat, tempfile
+import urwide
 
 try:
 	from mercurial.demandload import demandload
 	from mercurial.i18n import gettext as _
 except:
 	print "Failed to load Mercurial modules."
-	sys.exit(-1)
-
-try:
-	import urwid
-	import urwid.curses_display
-except:
-	print "URWIS is required. You can get it from <%s>" % (
-	"http://excess.org/urwid/")
 	sys.exit(-1)
 
 demandload(globals(), 'mercurial.ui mercurial.util mercurial.commands mercurial.localrepo')
@@ -36,9 +29,195 @@ Easycommit is a tool that allows better, richer, more structured commits for
 Mercurial. It eases the life of the developers and enhances the quality and
 consistency of commits.
 """
+
 # ------------------------------------------------------------------------------
 #
-# EVENTS
+# CURSES INTERFACE
+#
+# ------------------------------------------------------------------------------
+
+CHOICES = {
+	"edit_state":["WIP", "UNSTABLE", "STABLE", "RELEASE"],
+	"edit_type": ["Feature", "Bugfix", "Refactor"]
+}
+
+STYLE = """
+Frame         : Dg,  _, SO
+header        : WH, DC, BO
+footer        : LG,  _, SO
+info          : WH, Lg, BO
+shade         : DC, Lg, BO
+
+label         : Lg,  _, SO
+
+Edit          : BL,  _, BO
+Edit*         : DM, Lg, BO
+Button        : WH, DC, BO
+Button*       : WH, DM, BO
+Divider       : Lg,  _, SO
+
+#edit_summary : DM,  _, SO
+"""
+
+UI = """\
+Hdr MERCURIAL - Easycommit %s
+::: @shade
+
+Edt  State         [WIP]            #edit_state  &key=cycle
+Edt  Commit Type   [Feature]        #edit_type   &key=cycle
+Edt  Name          [User name]
+Edt  Summary       [One line commit summary]     #edit_summary &key=sumUp
+---
+Edt  [Your project description]     #edit_desc &key=describe &edit=formatDescription multiline=True 
+===
+Txt  Changes to commit  
+---
+Ple                                 #pile_commit
+End
+GFl                                 align=RIGHT
+Btn [Cancel]                        #btn_cancel &press=cancel
+Btn [Save]                          #btn_save   &press=save
+Btn [Commit]                        #btn_commit &press=commit
+End
+	""" % (__version__)
+
+class Interface:
+	"""Main user interface for easycommit."""
+
+	def __init__(self):
+		self.ui = urwide.UI(STYLE, UI)
+		self.defaultHandler = Handler()
+		self.ui.handler(self.defaultHandler)
+		self.ui.strings.STATES      = "LEFT/- or RIGHT/+ to select a project state"
+		self.ui.strings.TYPE        = "LEFT/- or RIGHT/+ to select a project type"
+		self.ui.DEFAULT_SUMMARY     = self.ui.widgets.edit_summary.get_edit_text()
+		self.ui.DEFAULT_DESCRIPTION = self.ui.widgets.edit_desc.get_edit_text()
+
+	def main( self, commit = None ):
+		self.ui.main()
+
+class Handler(urwide.Handler):
+
+	def onSave( self, button ):
+		self.ui.footer("Save")
+
+	def onCancel( self, button ):
+		self.ui.footer("Cancel")
+
+	def onCommit( self, button ):
+		self.ui.footer("Commit")
+
+	def onChangeDescription( self, widget, oldtext, newtext ):
+		pass
+
+	def onCycle( self, widget, key ):
+		name    = self.ui.id(widget)
+		choices = CHOICES[name]
+		current = choices.index(widget.get_edit_text())
+		if key == "left" or key == "-":
+			current = ( current-1 ) % (len(choices))
+			widget.set_edit_text(choices[current])
+		elif key == "right" or key == "+":
+			current = ( current+1 ) % (len(choices))
+			widget.set_edit_text(choices[current])
+		elif key in ("up", "down"):
+			return False
+		else:
+			return True
+
+	def onMarkAsPressed( self, widget, key ):
+		if key in ("left", "right", "up", "down"): return False
+		widget._wasPressed = True
+		return False
+
+	def onSumUp( self, widget, key ):
+		if hasattr(widget, "_alreadyEdited"): return False
+		if key in ("left", "right", "up", "down"): return False
+		widget.set_edit_text("")
+		widget._alreadyEdited = True
+		return False
+
+	def onDescribe( self, widget, key ):
+		if key in ("left", "right", "up", "down"):
+			return False
+		if not hasattr(widget, "_alreadyEdited"):
+			widget.set_edit_text("")
+			widget._alreadyEdited = True
+		return False
+
+	def onFormatDescription( self, widget, previous, text ):
+		if previous == text: return False
+		# We adjust the text width
+		while len(text) > 1 and text[-1] == "\n" and text[-2] == "\n": text = text[:-1]
+		while text.count("\n") < 6: text += "\n"
+		widget.set_edit_text(text)
+
+	# SPECIFIC ACTIONS
+	# _________________________________________________________________________
+
+	def updateCommitFiles(self):
+		assert self.commit
+		widgets = []
+		# Function invoked when focusing a checkbox
+		def on_focus(c):
+			text = c.commitEvent.info()
+			if text: self.footer(text=text, info="[v] Review differences")
+		# Iterates on evnets and registers checkboxes
+		for event in self.commit.events:
+			checkbox = urwid.CheckBox("%-10s %s" %(event.name, event.path), state=True)
+			checkbox.commitEvent = event
+			checkbox.onFocus     = on_focus
+			widgets.append(CLASS("checkbox", checkbox))
+		self.pile_commitFiles.widget_list = widgets
+		self.pile_commitFiles.set_focus(0)
+
+	def reviewFile( self, commitEvent ):
+		parent_rev = commitEvent.parentRevision()
+		fd, path   = tempfile.mkstemp(prefix="hg-easycommit")
+		os.write(fd, parent_rev)
+		self.footer("Reviewing differences for " + commitEvent.path)
+		os.popen("gview -df '%s' '%s'" % (commitEvent.abspath(), path)).read()
+		os.close(fd)
+		os.unlink(path)
+
+# ------------------------------------------------------------------------------
+#
+# COMMIT OBJECT
+#
+# ------------------------------------------------------------------------------
+# NOTE: We decided to wrap the current Mercurial commit datastructure into an OO
+# layer that eases the manipulation of the commit data.
+
+class Commit:
+	"""A Commit object contains useful information about a Mercurial commit."""
+
+	def __init__( self, repo ):
+		self.events = []
+		self.repo   = repo
+
+	def commandInRepo( self, command ):
+		"""Executes the given command within the repository, and returns its
+		result."""
+		cwd = os.getcwd()
+		os.chdir(os.path.dirname(self.repo.path))
+		res = os.popen(command).read()
+		os.chdir(cwd)
+		return res
+
+	def hg( self, command ):
+		return self.commandInRepo("hg " + command)
+
+	def parent( self ):
+		"""Returns the local parent revision number."""
+		parent = self.hg("parent").split("\n")[0].split(":")[1].strip()
+		return parent
+
+	def __str__( self ):
+		return str(self.events)
+
+# ------------------------------------------------------------------------------
+#
+# COMMIT EVENTS
 #
 # ------------------------------------------------------------------------------
 
@@ -116,278 +295,6 @@ class RemoveEvent( Event ):
 
 # ------------------------------------------------------------------------------
 #
-# COMMIT OBJECT
-#
-# ------------------------------------------------------------------------------
-
-class Commit:
-	"""A Commit object contains useful information about a Mercurial commit."""
-
-	def __init__( self, repo ):
-		self.events = []
-		self.repo   = repo
-
-	def commandInRepo( self, command ):
-		"""Executes the given command within the repository, and returns its
-		result."""
-		cwd = os.getcwd()
-		os.chdir(os.path.dirname(self.repo.path))
-		res = os.popen(command).read()
-		os.chdir(cwd)
-		return res
-
-	def hg( self, command ):
-		return self.commandInRepo("hg " + command)
-
-	def parent( self ):
-		"""Returns the local parent revision number."""
-		parent = self.hg("parent").split("\n")[0].split(":")[1].strip()
-		return parent
-
-	def __str__( self ):
-		return str(self.events)
-
-# ------------------------------------------------------------------------------
-#
-# CURSES INTERFACE
-#
-# ------------------------------------------------------------------------------
-
-BLANK     = urwid.Text("")
-
-def CLASS(c,f):
-	if c.upper() in map(lambda x:x[0], CommitEditor.PALETTE):
-		return urwid.AttrWrap(f,c,c.upper())
-	else:
-		return urwid.AttrWrap(f,c)
-
-def isKey( key ):
-	return key in ("left", "right", "up", "down")
-
-COMMIT_STATES            = ["WIP", "UNSTABLE", "STABLE", "RELEASE"]
-COMMIT_TYPES             = ["Feature", "Bugfix", "Refactor"]
-
-TOOLTIP_EDIT_STATE       = "LEFT/- or RIGHT/+ to select a project state: %s" % (" ".join(COMMIT_STATES))
-TOOLTIP_EDIT_TYPE        = "LEFT/- or RIGHT/+ to select a commit type: %s" % (" ".join(COMMIT_TYPES))
-TOOLTIP_EDIT_SUMMARY     = ""
-TOOLTIP_EDIT_DESCRIPTION = ""
-
-DEFAULT_EDIT_STATE       = "WIP"
-DEFAULT_EDIT_TYPE        = "Feature"
-DEFAULT_EDIT_SUMMARY     = "A one line summary of your commit"
-DEFAULT_EDIT_DESCRIPTION = """\
-A longer description, where you can give a list of what you changed:
-
-- Added this
-- Updated that
-- Moved this
-- Changed that
-"""
-
-class CommitEditor:
-
-	PALETTE = [
-		('background',         'dark gray',    'default',    'standout'),
-		('header',             'white',        'dark cyan',  'bold'),
-		('footer',             'light gray',    'default',  'standout'),
-		('info',               'white',        'light gray',  'bold'),
-		('shade',              'dark cyan',    'light gray',  'bold'),
-		('label',              'light gray',   'default',    'standout'),
-		('divider',            'light gray',   'default',    'standout'),
-		('edit',               'black',        'default',    'bold'),
-		('summary',            'dark magenta',  'default',    'standout'),
-		('SUMMARY',            'dark magenta',  'light gray',    'standout'),
-		('EDIT',               'dark magenta', 'light gray', 'bold'),
-		('text',               'black',        'default',    'bold'),
-		('TEXT',               'dark blue',    'light gray', 'bold'),
-		('checkbox',           'black',        'default',    'standout'),
-		('CHECKBOX',           'dark magenta', 'light gray', 'bold'),
-		('button',             'white',        'dark cyan',  'bold'),
-		('BUTTON',             'white',        'dark magenta',  'bold'),
-		('dialog',             'yellow',        'dark blue',  'bold'),
-	]
-
-	def __init__(self):
-		# The commit object
-		self.commit            = None
-		# We define the basic components
-		self.edit_state        = urwid.Edit( ('label',"Project State : "), DEFAULT_EDIT_STATE)
-		self.edit_type         = urwid.Edit( ('label',"Commit Type   : "), DEFAULT_EDIT_TYPE)
-		self.edit_summary      = urwid.Edit( ('label',"Summary       : "), DEFAULT_EDIT_SUMMARY)
-		self.edit_description  = urwid.Edit( "", DEFAULT_EDIT_DESCRIPTION, multiline=True)
-		self.edit_state.tooltip = TOOLTIP_EDIT_STATE
-		self.edit_type.tooltip  = TOOLTIP_EDIT_TYPE
-		self.edit_summary.tooltip  = TOOLTIP_EDIT_SUMMARY
-		self.edit_description.tooltip  = TOOLTIP_EDIT_DESCRIPTION
-		# We register editing hooks
-		self.edit_state.keypress       = self.onEditState
-		self.edit_state.keypress       = self.onEditState
-		self.edit_type.keypress        = self.onEditType
-		self.edit_summary.keypress     = self.onEditSummary
-		self.edit_description.keypress = self.onEditDescription
-		# We describe the User Interface
-		self.pile_commitFiles = urwid.Pile([urwid.Text("No commit data")])
-		self.content     = [
-			CLASS('shade', urwid.Divider(":")),
-			BLANK,
-			CLASS('edit', self.edit_state),
-			CLASS('edit', self.edit_type),
-			CLASS('summary', self.edit_summary),
-			CLASS('divider', urwid.Divider("-")),
-			CLASS('text', self.edit_description),
-			CLASS('divider', urwid.Divider("=")),
-			CLASS('label', urwid.Text( "Changes to commit")),
-			CLASS('divider', urwid.Divider("-")),
-			self.pile_commitFiles,
-			CLASS('divider', urwid.Divider("_")),
-			urwid.GridFlow(map(lambda x:CLASS("button", x),  [
-				urwid.Button("Cancel", self.cancel),
-				urwid.Button("Save",   self.save),
-				urwid.Button("Commit", self.commit),
-			]), 10,1,1, 'right') ,
-		]
-		instruct     = urwid.Text("MERCURIAL - Easycommit %s" % (__version__))
-		header       = urwid.AttrWrap( instruct, 'header' )
-		self.listbox = urwid.ListBox(self.content)
-		self.frame   = urwid.Frame(self.listbox, header)
-		# self.topwidget = urwid.Overlay( self.dialog(), self.frame, 'center', 40, 'middle', 10)
-		self.topwidget = self.frame
-		urwid.AttrWrap(self.frame, 'background')
-
-	def updateCommitFiles(self):
-		assert self.commit
-		widgets = []
-		# Function invoked when focusing a checkbox
-		def on_focus(c):
-			text = c.commitEvent.info()
-			if text: self.footer(text=text, info="[v] Review differences")
-		# Iterates on evnets and registers checkboxes
-		for event in self.commit.events:
-			checkbox = urwid.CheckBox("%-10s %s" %(event.name, event.path), state=True)
-			checkbox.commitEvent = event
-			checkbox.onFocus     = on_focus
-			widgets.append(CLASS("checkbox", checkbox))
-		self.pile_commitFiles.widget_list = widgets
-		self.pile_commitFiles.set_focus(0)
-
-	def main(self, commit ):
-		self.commit = commit
-		self.updateCommitFiles()
-		self.ui = urwid.curses_display.Screen()
-		self.ui.register_palette(self.PALETTE)
-		self.ui.run_wrapper( self.run )
-
-	def run(self):
-		size = self.currentSize = self.ui.get_cols_rows()
-		while True:
-			focused = self.listbox.get_focus()[0]
-			if isinstance(focused, urwid.AttrWrap): focused = focused.w
-			if isinstance(focused, urwid.Pile):     focused = focused.get_focus()
-			# These are URWID extensions to manage tooltip and onFocus
-			self.footer()
-			if hasattr(focused, "tooltip") and focused.tooltip:
-				self.footer(info=focused.tooltip)
-			if hasattr(focused, "onFocus"):
-				focused.onFocus(focused)
-			self.draw_screen( self.currentSize )
-			keys    = self.ui.get_input()
-			# We handle keys
-			if "f1" in keys:
-				break
-			for k in keys:
-				if k == "window resize":
-					size = self.ui.get_cols_rows()
-					continue
-				if focused and k == 'v':
-					self.reviewFile(focused.commitEvent)
-				else:
-					self.topwidget.keypress( size, k )
-
-	def reviewFile( self, commitEvent ):
-		parent_rev = commitEvent.parentRevision()
-		fd, path   = tempfile.mkstemp(prefix="hg-easycommit")
-		os.write(fd, parent_rev)
-		self.footer("Reviewing differences for " + commitEvent.path)
-		os.popen("gview -df '%s' '%s'" % (commitEvent.abspath(), path)).read()
-		os.close(fd)
-		os.unlink(path)
-
-	def cancel( self, e ):
-		self.footer("Cancel")
-
-	def save( self, e ):
-		self.footer("Save")
-
-	def commit( self, e ):
-		self.footer("Commit")
-
-	def keypress(self, size, k):
-		pass
-
-	def footer( self, text=None, info=None ):
-		content = []
-		if text: content.append(CLASS('footer',urwid.Text(text)))
-		if info: content.append(CLASS('info',  urwid.Text(info)))
-		if not content:
-			self.frame.footer = None
-		else:
-			self.frame.footer = urwid.Pile(content)
-
-	def dialog( self, message="HELLO" ):
-		dialog = CLASS("dialog", urwid.ListBox([
-			urwid.Text("TITLE"),
-			urwid.Divider("="),
-			urwid.Text("Pouet"),
-			urwid.Button("Pouet", lambda x:x),
-			urwid.Button("Pouet", lambda x:x)
-		]))
-		return dialog
-
-	def draw_screen(self, size):
-		canvas = self.topwidget.render( size, focus=True )
-		self.ui.draw_screen( size, canvas )
-	
-	def onEditState( self, size, key ):
-		i = COMMIT_STATES.index(self.edit_state.get_edit_text())
-		if key == "left" or key == "-":
-			i = ( i-1 ) % (len(COMMIT_STATES))
-			self.edit_state.set_edit_text(COMMIT_STATES[i])
-		elif key == "right" or key == "+":
-			i = ( i+1 ) % (len(COMMIT_STATES))
-			self.edit_state.set_edit_text(COMMIT_STATES[i])
-		else:
-			return key
-
-	def onEditType( self, size, key ):
-		i = COMMIT_TYPES.index(self.edit_type.get_edit_text())
-		if key == "left" or key == "-":
-			i = ( i-1 ) % (len(COMMIT_TYPES))
-			self.edit_type.set_edit_text(COMMIT_TYPES[i])
-		elif key == "right" or key == "+":
-			i = ( i+1 ) % (len(COMMIT_TYPES))
-			self.edit_type.set_edit_text(COMMIT_TYPES[i])
-		else:
-			return key
-
-	def onEditSummary( self, size, key ):
-		if not isKey(key) \
-		and self.edit_summary.get_edit_text() == DEFAULT_EDIT_SUMMARY:
-			self.edit_summary.set_edit_text("")
-		return self.edit_summary.__class__.keypress( self.edit_summary, size, key) 
-
-	def onEditDescription( self, size, key ):
-		if not isKey(key) \
-		and self.edit_description.get_edit_text() == DEFAULT_EDIT_DESCRIPTION:
-			self.edit_description.set_edit_text("")
-		res  = self.edit_description.__class__.keypress( self.edit_description, size, key) 
-		text = self.edit_description.get_edit_text()
-		while len(text) > 1 and text[-1] == "\n" and text[-2] == "\n": text = text[:-1]
-		while text.count("\n") < 6: text += "\n"
-		text = self.edit_description.set_edit_text(text)
-		return res
-
-# ------------------------------------------------------------------------------
-#
 # MERCURIAL COMMAND REGISTRATION
 #
 # ------------------------------------------------------------------------------
@@ -449,7 +356,7 @@ def command_main( ui, repo, *args, **opts ):
 # command_main
 COMMIT_DEFAULTS = command_defaults("commit")
 cmdtable = {
-	"commit": ( command_main, [], 'hg commit', "FOU" )
+	"commit": ( command_main, [], 'hg commit', "TODO" )
 }
 
 # ------------------------------------------------------------------------------
@@ -459,6 +366,6 @@ cmdtable = {
 # ------------------------------------------------------------------------------
 
 if __name__ == "__main__":
-	CommitEditor().main(Commit())
+	Interface().main()
 
 # EOF
