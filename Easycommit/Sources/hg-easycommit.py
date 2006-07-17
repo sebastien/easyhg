@@ -12,7 +12,7 @@
 # -----------------------------------------------------------------------------
 
 import sys, os, re, time, stat, tempfile
-import urwide
+import urwide, urwid
 
 try:
 	from mercurial.demandload import demandload
@@ -23,7 +23,7 @@ except:
 
 demandload(globals(), 'mercurial.ui mercurial.util mercurial.commands mercurial.localrepo')
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __doc__     = """\
 Easycommit is a tool that allows better, richer, more structured commits for
 Mercurial. It eases the life of the developers and enhances the quality and
@@ -46,6 +46,7 @@ Frame         : Dg,  _, SO
 header        : WH, DC, BO
 footer        : LG,  _, SO
 info          : WH, Lg, BO
+tooltip       : Lg,  _, SO
 shade         : DC, Lg, BO
 
 label         : Lg,  _, SO
@@ -55,6 +56,8 @@ Edit*         : DM, Lg, BO
 Button        : WH, DC, BO
 Button*       : WH, DM, BO
 Divider       : Lg,  _, SO
+CheckBox      : BL,  _, SO
+CheckBox*     : DM, Lg, BO
 
 #edit_summary : DM,  _, SO
 """
@@ -65,18 +68,17 @@ Hdr MERCURIAL - Easycommit %s
 
 Edt  State         [WIP]            #edit_state  &key=cycle
 Edt  Commit Type   [Feature]        #edit_type   &key=cycle
-Edt  Name          [User name]
+Edt  Name          [$USERNAME]      #edit_user
 Edt  Summary       [One line commit summary]     #edit_summary &key=sumUp
 ---
 Edt  [Your project description]     #edit_desc &key=describe &edit=formatDescription multiline=True 
 ===
 Txt  Changes to commit  
 ---
-Ple                                 #pile_commit
+Ple                                 #changes
 End
 GFl                                 align=RIGHT
 Btn [Cancel]                        #btn_cancel &press=cancel
-Btn [Save]                          #btn_save   &press=save
 Btn [Commit]                        #btn_commit &press=commit
 End
 	""" % (__version__)
@@ -85,27 +87,52 @@ class Interface:
 	"""Main user interface for easycommit."""
 
 	def __init__(self):
-		self.ui = urwide.UI(STYLE, UI)
+		self.ui = urwide.UI()
 		self.defaultHandler = Handler()
 		self.ui.handler(self.defaultHandler)
 		self.ui.strings.STATES      = "LEFT/- or RIGHT/+ to select a project state"
 		self.ui.strings.TYPE        = "LEFT/- or RIGHT/+ to select a project type"
-		self.ui.DEFAULT_SUMMARY     = self.ui.widgets.edit_summary.get_edit_text()
-		self.ui.DEFAULT_DESCRIPTION = self.ui.widgets.edit_desc.get_edit_text()
+		self.ui.strings.CHANGE      = "[v] review differences"
 
 	def main( self, commit = None ):
+		self.ui.parse(STYLE, UI)
+		self.ui.DEFAULT_SUMMARY     = self.ui.widgets.edit_summary.get_edit_text()
+		self.ui.DEFAULT_DESCRIPTION = self.ui.widgets.edit_desc.get_edit_text()
+		self.ui.data.commit = commit
+		if commit:
+			self.defaultHandler.updateCommitFiles()
 		self.ui.main()
 
+	def selectedChanges(self):
+		return self.defaultHandler.selectedChanges()
+
+	def commitMessage( self ):
+		desc = self.ui.widgets.edit_desc.get_edit_text() 
+		desc = desc.replace("\n\n", "\n")
+		msg = "%s: %s\n%sChanges type: %s\n" % (
+			self.ui.widgets.edit_state.get_edit_text(),
+			self.ui.widgets.edit_summary.get_edit_text(),
+			desc,
+			self.ui.widgets.edit_type.get_edit_text(),
+		)
+		return msg
+
+	def commitUser( self ):
+		return self.ui.widgets.edit_user.get_edit_text()
+
 class Handler(urwide.Handler):
+	"""Main event handler."""
 
 	def onSave( self, button ):
-		self.ui.footer("Save")
+		self.ui.tooltip("Save")
 
 	def onCancel( self, button ):
-		self.ui.footer("Cancel")
+		self.ui.tooltip("Cancel")
+		sys.exit(-1)
 
 	def onCommit( self, button ):
-		self.ui.footer("Commit")
+		self.ui.tooltip("Commit")
+		self.ui.end()
 
 	def onChangeDescription( self, widget, oldtext, newtext ):
 		pass
@@ -124,11 +151,6 @@ class Handler(urwide.Handler):
 			return False
 		else:
 			return True
-
-	def onMarkAsPressed( self, widget, key ):
-		if key in ("left", "right", "up", "down"): return False
-		widget._wasPressed = True
-		return False
 
 	def onSumUp( self, widget, key ):
 		if hasattr(widget, "_alreadyEdited"): return False
@@ -152,24 +174,24 @@ class Handler(urwide.Handler):
 		while text.count("\n") < 6: text += "\n"
 		widget.set_edit_text(text)
 
+	def onChangeInfo( self, widget ):
+		self.ui.tooltip(widget.commitEvent.info())
+
 	# SPECIFIC ACTIONS
 	# _________________________________________________________________________
 
 	def updateCommitFiles(self):
-		assert self.commit
+		commit = self.ui.data.commit
+		# Cleans up the existing widgets
+		changes = self.ui.widgets.changes
+		changes.remove_widgets()
 		widgets = []
-		# Function invoked when focusing a checkbox
-		def on_focus(c):
-			text = c.commitEvent.info()
-			if text: self.footer(text=text, info="[v] Review differences")
 		# Iterates on evnets and registers checkboxes
-		for event in self.commit.events:
-			checkbox = urwid.CheckBox("%-10s %s" %(event.name, event.path), state=True)
+		for event in commit.events:
+			checkbox = self.ui.new(urwid.CheckBox, "%-10s %s" %(event.name, event.path), True)
+			changes.add_widget(self.ui.wrap(checkbox, "?CHANGE &focus=changeInfo"))
 			checkbox.commitEvent = event
-			checkbox.onFocus     = on_focus
-			widgets.append(CLASS("checkbox", checkbox))
-		self.pile_commitFiles.widget_list = widgets
-		self.pile_commitFiles.set_focus(0)
+		self.ui.widgets.changes.set_focus(0)
 
 	def reviewFile( self, commitEvent ):
 		parent_rev = commitEvent.parentRevision()
@@ -179,6 +201,14 @@ class Handler(urwide.Handler):
 		os.popen("gview -df '%s' '%s'" % (commitEvent.abspath(), path)).read()
 		os.close(fd)
 		os.unlink(path)
+
+	def selectedChanges( self ):
+		"""Returns the list of selected change events."""
+		events = []
+		for checkbox in map(self.ui.unwrap, self.ui.widgets.changes.widget_list):
+			if not checkbox.state: continue
+			events.append(checkbox.commitEvent)
+		return events
 
 # ------------------------------------------------------------------------------
 #
@@ -299,6 +329,8 @@ class RemoveEvent( Event ):
 #
 # ------------------------------------------------------------------------------
 
+USERNAME = None
+
 def commit_wrapper(repo, files=None, text="", user=None, date=None,
     match=mercurial.util.always, force=False, lock=None, wlock=None,
     force_editor=False):
@@ -324,9 +356,14 @@ def commit_wrapper(repo, files=None, text="", user=None, date=None,
 	for c in removed: commit_object.events.append(RemoveEvent(commit_object, c))
 	if commit_object.events:
 		# And we invoke the commit editor
-		CommitEditor().main(commit_object)
+		app = Interface()
+		app.ui.strings.USERNAME = USERNAME
+		app.main(commit_object)
+		files = map(lambda c:c.path, app.selectedChanges())
 		# Now we execute the old commit method
-		#repo._old_commit( files, text, user, date, match, force, lock, wlock, force_editor )
+		if files:
+			repo._old_commit( files, app.commitMessage(), app.commitUser(),
+			date, match, force, lock, wlock, force_editor )
 	else:
 		print "No changes: nothing to commit"
 
@@ -344,6 +381,7 @@ def command_main( ui, repo, *args, **opts ):
 	repo_old_commit            = repo.__class__.commit
 	repo.__class__.commit      = commit_wrapper
 	repo.__class__._old_commit = repo_old_commit
+	global USERNAME ; USERNAME = ui.username()
 	# Sets the default commit options
 	for key, value in COMMIT_DEFAULTS.items():
 		if not opts.has_key(key): opts[key] = value
@@ -365,7 +403,5 @@ cmdtable = {
 #
 # ------------------------------------------------------------------------------
 
-if __name__ == "__main__":
-	Interface().main()
 
 # EOF
