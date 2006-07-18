@@ -170,41 +170,44 @@ def diff_count( a, b ):
 # -----------------------------------------------------------------------------
 
 CONSOLE_STYLE = """\
-Frame         : Dg,  _, SO
+Frame         : WH, DB, SO
 header        : WH, DC, BO
-footer        : LG,  _, SO
+footer        : LG, DB, SO
 info          : WH, Lg, BO
-tooltip       : Lg,  _, SO
-shade         : DC, Lg, BO
+tooltip       : Lg, DB, SO
 
-label         : Lg,  _, SO
+label         : Lg, DB, SO
 
-resolved      : DG,  _, SO
-unresolved    : LR,  _, SO
+resolved      : DG, DB, SO
+unresolved    : LR, DB, SO
 
-Edit          : BL,  _, BO
-Edit*         : DM, Lg, BO
-Button        : WH, DC, BO
+Edit          : WH, DB, BO
+Edit*         : WH, DM, BO
+Button        : LC, DB, BO
 Button*       : WH, DM, BO
-Divider       : Lg,  _, SO
-Text      : BL,  _, SO
-Text*     : DM, Lg, BO
+Divider       : DC, DB, SO
+Text          : Lg, DB, SO
+Text*         : WH, DM, BO
 
-#edit_summary : DM,  _, SO
+#edit_summary : DM, DB, SO
 """
 
 CONSOLE_UI = """\
 Hdr MERCURIAL - Easymerge %s
-::: @shade
 
-Txt  Unresolved conflicts
-Txt  --------------------
-Ple                                 #unresolved
-End
----
-Txt  Resolved conflicts
-Txt  ------------------
-Ple                                 #resolved
+Txt  Conflicts
+===
+Col                                 #conflicts
+    Ple                             #conflict
+    End
+    Ple                             #state
+    End
+    Ple                             #current
+    End
+    Ple                             #parent
+    End
+    Ple                             #other
+    End
 End
 ===
 GFl
@@ -230,24 +233,25 @@ class ConsoleUI(urwide.Handler):
         self.ui.main()
 
     def updateConflicts( self ):
-        resolved   = self.ui.widgets.resolved
-        unresolved = self.ui.widgets.unresolved
-        resolved.remove_widgets()
-        unresolved.remove_widgets()
-        # Unresolved
-        for c in self.ui.data.conflicts.unresolved():
-            conflict = self.ui.new(urwid.Edit, str(c))
-            unresolved.add_widget(self.ui.wrap(conflict, "@unresolved &key=resolve ?UNRESOLVED"))
-            conflict.conflict = c
-        if unresolved.widget_list: unresolved.set_focus(0)
-        else: unresolved.add_widget(self.ui.new(urwid.Text, "   All conflicts resolved!"))
-        # Resolved
-        for c in self.ui.data.conflicts.resolved():
-            conflict = self.ui.new(urwid.Edit, str(c))
-            resolved.add_widget(self.ui.wrap(conflict, "@resolved &key=undo ?RESOLVED"))
-            conflict.conflict = c
-        if resolved.widget_list: resolved.set_focus(0)
-        else: resolved.add_widget(self.ui.new(urwid.Text, "   No resolved conflict"))
+        def clear( widget ):
+            self.ui._widgets[widget].remove_widgets()
+        def add( conflict, parent, *args ):
+            widget = self.ui.new(*args)
+            widget.conflict = widget
+            self.ui._widgets[parent].add_widget(widget)
+            return widget
+        def finish( widget ):
+            self.ui._widgets[widget].set_focus(0)
+        map(clear, "conflict state current parent other".split())
+        # We register the conflicts
+        for c in self.ui.data.conflicts.all():
+            add(c, "conflict", urwid.Edit, c.path())
+            add(c, "state",    urwid.Text, c.state)
+            add(c, "current",  urwid.CheckBox, "current", False)
+            add(c, "parent",   urwid.CheckBox, "parent", False)
+            add(c, "other" ,   urwid.CheckBox, "other", False)
+            #conflict.add_widget(self.ui.wrap(conflict, "@unresolved &key=resolve ?UNRESOLVED"))
+        map(finish, "conflict state current parent other".split())
 
     def onResolve( self, widget, key ):
         if key in ("up", "down"): return False
@@ -358,6 +362,9 @@ class Conflicts:
         f = file(self._path, "w")
         f.write(str(self))
         f.close()
+
+    def all( self ):
+        return self._conflicts
 
     def resolved( self, number=None ):
         """Returns the list of resolved conflicts"""

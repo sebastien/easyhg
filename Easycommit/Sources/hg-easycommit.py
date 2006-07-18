@@ -23,7 +23,7 @@ except:
 
 demandload(globals(), 'mercurial.ui mercurial.util mercurial.commands mercurial.localrepo')
 
-__version__ = "0.2.0"
+__version__ = "0.9.0"
 __doc__     = """\
 Easycommit is a tool that allows better, richer, more structured commits for
 Mercurial. It eases the life of the developers and enhances the quality and
@@ -41,44 +41,45 @@ CHOICES = {
 	"edit_type": ["Feature", "Bugfix", "Refactor"]
 }
 
-STYLE = """
-Frame         : Dg,  _, SO
+STYLE = """\
+Frame         : WH, DB, SO
 header        : WH, DC, BO
-footer        : LG,  _, SO
+footer        : LG, DB, SO
 info          : WH, Lg, BO
-tooltip       : Lg,  _, SO
-shade         : DC, Lg, BO
+tooltip       : Lg, DB, SO
 
-label         : Lg,  _, SO
+label         : Lg, DB, SO
+title         : WH, DB, BO
 
-Edit          : BL,  _, BO
-Edit*         : DM, Lg, BO
-Button        : WH, DC, BO
+Edit          : WH, DB, BO
+Edit*         : WH, DM, BO
+Button        : LC, DB, BO
 Button*       : WH, DM, BO
-Divider       : Lg,  _, SO
-CheckBox      : BL,  _, SO
-CheckBox*     : DM, Lg, BO
+CheckBox      : Lg, DB, SO
+CheckBox*     : Lg, DM, SO
+Divider       : DC, DB, SO
+Text          : Lg, DB, SO
+Text*         : WH, DM, BO
 
-#edit_summary : DM,  _, SO
+#edit_summary : YL, DB, SO
 """
 
 UI = """\
 Hdr MERCURIAL - Easycommit %s
-::: @shade
 
-Edt  State         [WIP]            #edit_state  &key=cycle
-Edt  Commit Type   [Feature]        #edit_type   &key=cycle
 Edt  Name          [$USERNAME]      #edit_user
 Edt  Summary       [One line commit summary]     #edit_summary &key=sumUp
----
-Edt  [Your project description]     #edit_desc &key=describe &edit=formatDescription multiline=True 
-===
-Txt  Changes to commit  
----
-Ple                                 #changes
+Edt  Tags          [Stable, WIP]
+Dvd ___
+
+Ple                                 #changes 
 End
+Dvd ___
+
+Edt  [Notes] #edit_desc multiline=True
+Dvd ___
+
 GFl                                 align=RIGHT
-Btn [Cancel]                        #btn_cancel &press=cancel
 Btn [Commit]                        #btn_commit &press=commit
 End
 	""" % (__version__)
@@ -171,7 +172,6 @@ class Handler(urwide.Handler):
 		if previous == text: return False
 		# We adjust the text width
 		while len(text) > 1 and text[-1] == "\n" and text[-2] == "\n": text = text[:-1]
-		while text.count("\n") < 6: text += "\n"
 		widget.set_edit_text(text)
 
 	def onChangeInfo( self, widget ):
@@ -396,12 +396,5 @@ COMMIT_DEFAULTS = command_defaults("commit")
 cmdtable = {
 	"commit": ( command_main, [], 'hg commit', "TODO" )
 }
-
-# ------------------------------------------------------------------------------
-#
-# MAIN
-#
-# ------------------------------------------------------------------------------
-
 
 # EOF
