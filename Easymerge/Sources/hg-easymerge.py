@@ -217,6 +217,7 @@ class ConsoleUI(urwide.Handler):
 
     def __init__(self, conflicts):
         urwide.Handler.__init__(self)
+        self.ops = Operations(conflicts)
         self.ui = urwide.UI()
         self.ui.handler(self)
         self.ui.data.conflicts = conflicts
@@ -251,7 +252,7 @@ class ConsoleUI(urwide.Handler):
     def onResolve( self, widget, key ):
         if key in ("up", "down"): return False
         if key == "r":
-            resolve_conflict( self.ui.data.conflicts.root, widget.conflict.number)
+            self.ops.resolveConflict( widget.conflict.number)
 
 
 # -----------------------------------------------------------------------------
@@ -361,10 +362,9 @@ class Conflicts:
     def resolved( self, number=None ):
         """Returns the list of resolved conflicts"""
         if number == None:
-            return tuple(c for c in self._conflicts if c.state == Conflict.RESOLVED)
+            return filter(lambda c:c.state == Conflict.RESOLVED, self._conflicts)
         else:
-            res = tuple(c for c in self._conflicts if c.state ==
-            Conflict.RESOLVED and c.number == number)
+            res = filter(lambda c:c.state == Conflict.RESOLVED and c.number == number, self._conflicts)
             if not res: return None
             else: return res[0]
 
@@ -373,8 +373,7 @@ class Conflicts:
         if number == None:
             return tuple(c for c in self._conflicts if c.state == Conflict.UNRESOLVED)
         else:
-            res = tuple(c for c in self._conflicts if c.state ==
-            Conflict.UNRESOLVED and c.number == number)
+            res = filter(lambda c:c.state == Conflict.UNRESOLVED and c.number == number, self._conflicts)
             if not res: return None
             else: return res[0]
 
@@ -429,104 +428,131 @@ class Conflicts:
 #
 # -----------------------------------------------------------------------------
 
-def add_conflict(root, path, other ):
-    """Adds the given conflict to the list of conflicts (stored in a
-    '.hgconflicts' file), in the given root directory."""
-    conflicts = Conflicts(root)
-    c = conflicts.add(path, other)
-    conflicts.save()
-    return c
+class Operations:
 
-def list_conflicts(rootdir):
-    """Lists the conflicts in the given directory."""
-    conflicts = Conflicts(rootdir)
-    print conflicts.asString()
+    def __init__( self, conflicts ):
+        self.conflicts = conflicts
 
-def resolve_conflict(rootdir, number, action="merge"):
-    """Resolves the given conflict by merging at first."""
-    conflicts = Conflicts(rootdir)
-    number    = int(number)
-    conflict  = conflicts.unresolved(number)
-    if not conflict:
-        error("No conflict found: %s" % (number))
-        return
-    elif conflict.state == Conflict.RESOLVED:
-        warning("Conflict already resolved. Doing nothing.")
-        return
-    # Resolving the conflict
-    conflict_file = format(conflict.path(),color=RED)
-    if   action == "merge":
-        log("Resolving conflict", conflict_file ,"by",
-        format("manual merging",color=BLUE,  weight=BOLD))
-        os.system("%s %s %s" % (MERGETOOL, conflict.path(), conflict.other()))
-    elif action == "keep":
-        log("Resolving conflict", conflict_file ,"by",
-        format("keeping the file as it is",color=BLUE,  weight=BOLD))
-        pass
-    elif action == "update":
-        log("Resolving conflict", conflict_file, "by",
-        format("using the .other file", color=BLUE, weight=BOLD))
-        copy(conflict.other(), conflict.path())
-    else:
-        raise Exception("Unknown resolution action: " + action)
-    res = ask("Did you resolve the conflict (y/n) ? ")
-    if res == "y":
-        info("Conflict resolved")
-        conflict.resolve()
-    conflicts.save()
+    def output( self, message ):
+        print message
 
-def resolve_conflicts(rootdir, *numbers):
-    """Resolves the given list of conflicts"""
-    conflicts = Conflicts(rootdir)
-    numbers   = map(int, numbers)
-    if not numbers:
-       unresolved = conflicts.unresolved()
-       if not unresolved:
-           warning("No conflict to resolve")
-           return
-       for conflict in unresolved:
-        resolve_conflict(rootdir, conflict.number) 
-    else:
-        for number in numbers:
-           resolve_conflict(rootdir, number) 
+    def ask( self, message ):
+        return ask(message)
 
-def undo_conflicts(rootdir, *numbers):
-    """Undo the given conflicts."""
-    conflicts = Conflicts(rootdir)
-    numbers   = map(int, numbers)
-    warning("NOTE: Undoing conflicts will revert your changes on the conflict file.")
-    for number in numbers:
-        conflict = conflicts.resolved(number)
-        if not conflicts:
-            error("No conflict with id: %s" % (number))
-            continue
-        if conflict.state == Conflict.UNRESOLVED:
-            error("Conflict is unresolved, so there is nothing to undo: %s" % (number))
-            continue
-        res = ask("Do you want to undo conflict on %s (y/n) ? " % (conflict.path()))
-        if res == "y":
-            log("Undoing conflict resolution, using %s as original data" % (conflict.current()))
-            conflict.unresolve()
-            copy(conflict.current(), conflict.path())
+    def error( self, message ):
+        error(message)
+
+    def log( self, *args ):
+        log(*args)
+
+    def info( self, *args):
+        info(*args)
+
+    def format( self, message, **kwargs ):
+        format(message, **kwargs)
+
+    def warning( self, message ):
+        warning(message)
+
+    def command( self, command ):
+        os.system(command)
+
+    def addConflicts( self, path, other ):
+        """Adds the given conflict to the list of conflicts (stored in a
+        '.hgconflicts' file), in the given root directory."""
+        c = self.conflicts.add(path, other)
+        self.conflicts.save()
+        return c
+
+    def listConflicts( self ):
+        """Lists the conflicts in the given directory."""
+        self.output(self.conflicts.asString())
+
+    def resolveConflict( self, number, action="merge"):
+        """Resolves the given conflict by merging at first."""
+        conflicts = self.conflicts
+        number    = int(number)
+        conflict  = conflicts.unresolved(number)
+        if not conflict:
+            self.error("No conflict found: %s" % (number))
+            return
+        elif conflict.state == Conflict.RESOLVED:
+            self.warning("Conflict already resolved. Doing nothing.")
+            return
+        # Resolving the conflict
+        conflict_file = format(conflict.path(),color=RED)
+        if   action == "merge":
+            self.log("Resolving conflict", conflict_file ,"by",
+            self.format("manual merging",color=BLUE,  weight=BOLD))
+            self.command("%s %s %s" % (MERGETOOL, conflict.path(), conflict.other()))
+        elif action == "keep":
+            self.log("Resolving conflict", conflict_file ,"by",
+            self.format("keeping the file as it is",color=BLUE,  weight=BOLD))
+            pass
+        elif action == "update":
+            self.log("Resolving conflict", conflict_file, "by",
+            self.format("using the .other file", color=BLUE, weight=BOLD))
+            copy(conflict.other(), conflict.path())
         else:
-            log("Conflict left as it is.")
+            raise Exception("Unknown resolution action: " + action)
+        res = self.ask("Did you resolve the conflict (y/n) ? ")
+        if res == "y":
+            self.info("Conflict resolved")
+            conflict.resolve()
+        conflicts.save()
 
-    conflicts.save()
+    def resolveConflicts( self, *numbers):
+        """Resolves the given list of conflicts"""
+        conflicts = self.conflicts
+        numbers   = map(int, numbers)
+        if not numbers:
+           unresolved = conflicts.unresolved()
+           if not unresolved:
+               warning("No conflict to resolve")
+               return
+           for conflict in unresolved:
+            self.resolveConflict(conflict.number) 
+        else:
+            for number in numbers:
+               self.resolveConflict(number) 
 
-def clean(rootdir):
-    """Cleans the given directory from the conflict backup files and from the
-    conflicts file itself."""
-    # If there is a conflicts file, we remove it
-    conflicts_file = os.path.join(rootdir, CONFLICTS_FILE)
-    if os.path.isfile(conflicts_file): os.unlink(conflicts_file)
-    # And we clean the directory
-    for root, dirs, files in os.walk(rootdir):
-        for name in files:
-            if CLEAN_MATCH.match(name):
-                path = os.path.join(root, name)
-                print "Cleaning up:", cutpath(rootdir, path) 
-                os.unlink(path)
-        if ".hg" in dirs: dirs.remove(".hg")
+    def undo( self, *numbers):
+        """Undo the given conflicts."""
+        conflicts = self.conflicts
+        numbers   = map(int, numbers)
+        self.warning("NOTE: Undoing conflicts will revert your changes on the conflict file.")
+        for number in numbers:
+            conflict = conflicts.resolved(number)
+            if not conflicts:
+                self.error("No conflict with id: %s" % (number))
+                continue
+            if conflict.state == Conflict.UNRESOLVED:
+                self.error("Conflict is unresolved, so there is nothing to undo: %s" % (number))
+                continue
+            res = self.ask("Do you want to undo conflict on %s (y/n) ? " % (conflict.path()))
+            if res == "y":
+                self.log("Undoing conflict resolution, using %s as original data" % (conflict.current()))
+                conflict.unresolve()
+                copy(conflict.current(), conflict.path())
+            else:
+                self.log("Conflict left as it is.")
+        conflicts.save()
+
+    def clean( self ):
+        """Cleans the given directory from the conflict backup files and from the
+        conflicts file itself."""
+        rootdir = self.conflicts.root
+        # If there is a conflicts file, we remove it
+        conflicts_file = os.path.join(rootdir, CONFLICTS_FILE)
+        if os.path.isfile(conflicts_file): os.unlink(conflicts_file)
+        # And we clean the directory
+        for root, dirs, files in os.walk(rootdir):
+            for name in files:
+                if CLEAN_MATCH.match(name):
+                    path = os.path.join(root, name)
+                    self.info("Cleaning up: " + cutpath(rootdir, path) )
+                    os.unlink(path)
+            if ".hg" in dirs: dirs.remove(".hg")
 
 # -----------------------------------------------------------------------------
 #
@@ -546,46 +572,51 @@ def run(args):
     if len(args) in (1,2) and args[0] == "list":
         if len(args) == 2: root = os.path.abspath(args[1])
         # We list the conflicts in the directory
-        list_conflicts(root)
+        ops  = Operations(Conflicts(root))
+        ops.listConflicts()
         return 0
     # Command: resolve [CONFLICT...]
     elif len(args) >= 1 and args[0] == "resolve":
+        ops  = Operations(Conflicts(root))
         conflicts = filter(lambda c:RE_NUMBER.match(c), args[1:])
         if len(conflicts) == 1:
             conflict = conflicts[0]
             if   len(args) == 2:
-                resolve_conflict(root, conflict, "merge")
+                ops.resolveConflict(conflict, "merge")
             elif len(args) == 3:
                 action = args[2].lower()
-                resolve_conflict(root, conflict, action)
+                ops.resolveConflict(conflict, action)
             else:
                 error("resolve expects a list of conflicts, or a conflict and an action")
         else:
             # We list the conflicts in the directory
-            resolve_conflicts(root, *conflicts)
+            ops.resolveConflicts(*conflicts)
         return 0
     # Command: undo CONFLICT...
     elif len(args) >= 2 and args[0] == "undo":
         conflicts = args[1:]
         # We list the conflicts in the directory
-        undo_conflicts(root, *conflicts)
+        ops  = Operations(Conflicts(root))
+        ops.undo(*conflicts)
         return 0
     # Command: clean [DIRECTORY]
     elif len(args) in (1,2) and args[0].startswith("clean"):
         # The directory to be cleaned up may be given, so we ensure it is
         # present
         if len(args) == 2: root = os.path.abspath(args[1])
+        ops  = Operations(Conflicts(root))
         # We clean the directory
-        clean(root)
+        ops.clean()
         return 0
     # Command: commit
     elif len(args) == 1 and args[0] == "commit":
         tip     = os.popen("hg tip").read()
         success = os.system("hg commit")
         success = os.popen("hg tip").read() != tip
+        # We clean the directory
         if success:
             info("Commit successful, cleaning up conflict resolution data.")
-            clean(root)
+            Operations(Conflicts(root)).clean()
             return 0
         else:
             info("Commit aborted, nothing done")
@@ -599,7 +630,8 @@ def run(args):
         parent_copy   = original + ".parent"
         other_copy    = original + ".other"
         # We print the conflict
-        conflict = add_conflict(root, original, other_copy)
+        ops  = Operations(Conflicts(root))
+        conflict = ops.addConflicts(original, other_copy)
         print "Conflict %4d:" % (conflict.number)
         print cutpath(root, original), "[" + str(int(diff_count(original, other))) + "%]"
         print "  parent      ", cutpath(root, parent_copy)
@@ -608,7 +640,7 @@ def run(args):
         # We backup .orig, .parent and .new that may already be tehre
         try:
             map(ensure_notexists, (parent_copy, original_copy, other_copy))
-        except Exception, e:
+        except Exception:
             error("Previous conflict files present. Please run", PROGRAM_NAME, "clean")
             return -1
         # And we create the new ones
