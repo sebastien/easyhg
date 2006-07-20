@@ -8,10 +8,10 @@
 # License   : GNU Public License         <http://www.gnu.org/licenses/gpl.html>
 # -----------------------------------------------------------------------------
 # Creation  : 05-May-2006
-# Last mod  : 17-Jul-2006
+# Last mod  : 20-Jul-2006
 # -----------------------------------------------------------------------------
 
-import os, sys, re, shutil, difflib, stat
+import os, sys, re, shutil, difflib, stat, sha
 try:
     import urwide, urwid
 except:
@@ -253,8 +253,8 @@ class ConsoleUI(urwide.Handler):
         self.ui = urwide.Console()
         self.ui.handler(self)
         self.ui.data.conflicts = conflicts
-        self.ui.strings.RESOLVED   = "[U]ndo [R]eview"
-        self.ui.strings.UNRESOLVED = "[V]iew [M]erge [K]eep [U]pdate"
+        self.ui.strings.RESOLVED   = "RESOLVED   [U]ndo [R]eview [Q]uit"
+        self.ui.strings.UNRESOLVED = "UNRESOLVED [V]iew [M]erge [K]eep [U]pdate [Q]uit"
 
     def main( self ):
         self.ui.parse(CONSOLE_STYLE, CONSOLE_UI)
@@ -313,17 +313,31 @@ class ConsoleUI(urwide.Handler):
                 conflict._ui_group[0].set_state( True )
 
     def onConflictFocus( self, widget ):
-        if widget.conflict.state == Conflict.RESOLVED:
-            self.ui.setTooltip(widget, "RESOLVED")
+        conflict = widget.conflict
+        def info( path ):
+            return "SHA-1:" + sha.new(conflict._read(path)).hexdigest()
+        if conflict.state == Conflict.RESOLVED:
+            self.ui.setInfo(widget, "RESOLVED")
         else:
-            self.ui.setTooltip(widget, "UNRESOLVED")
+            self.ui.setInfo(widget, "UNRESOLVED")
+        if   widget == conflict._ui_group[0]:
+            self.ui.setTooltip(widget, info(conflict.path()))
+        elif widget == conflict._ui_group[1]:
+            self.ui.setTooltip(widget, info(conflict.parent()))
+        elif widget == conflict._ui_group[2]:
+            self.ui.setTooltip(widget, info(conflict.other()))
+        else:
+            self.ui.setTooltip(widget, info(conflict.path()))
 
     def onConflict( self, widget, key ):
         if key in ('left', 'right', 'up', 'down'): return False
+        if key == "q":
+            self.ui.end() 
+            return
         conflict = widget.conflict
         if conflict.state == Conflict.RESOLVED:
             # Undoes the conflict
-            if   key == "u": 
+            if   key == "u":
                 self.ops.undo(conflict.number)
                 conflict._ui_state.set_text((conflict.state.lower(), conflict.state))
                 self._updateConflictView(conflict)
@@ -331,8 +345,6 @@ class ConsoleUI(urwide.Handler):
             elif key == "enter" or key == "r":
                 widget.set_state (True)
                 self.ops.reviewConflict(conflict)
-            else:
-                return False
         else:
             # Reviews the conflict
             if   key == "v": 
@@ -347,15 +359,15 @@ class ConsoleUI(urwide.Handler):
                 self._updateConflictView(conflict)
             # Keeps the parent version
             elif key == "k":
-                self.ops.resolveConflict( widget.conflict.number, "update")
+                self.ops.resolveConflict( widget.conflict.number, "keep")
                 self._updateConflictView(conflict)
             # Selects the current choice
-            elif key == "enter" or key == "space":
+            elif key == "enter" or key == " ":
                 group = conflict._ui_group
                 if widget == group[0]: self.onConflict(widget, "m")
                 elif widget == group[1]: self.onConflict(widget, "k")
                 elif widget == group[2]: self.onConflict(widget, "u")
-                else: raise "FUCK" + str(widget)
+                else: raise Exception("Unexpected widget: " + str(widget))
                 self._updateConflictView(conflict)
             else:
                 return False
@@ -647,8 +659,8 @@ class Operations:
             self.command("%s %s %s" % (MERGETOOL, conflict.path(), conflict.other()))
         elif action == "keep":
             self.log("Resolving conflict", conflict_file ,"by",
-            self.format("keeping the file as it is",color=BLUE,  weight=BOLD))
-            pass
+            self.format("keeping the parent version",color=BLUE,  weight=BOLD))
+            copy(conflict.parent(), conflict.path())
         elif action == "update":
             self.log("Resolving conflict", conflict_file, "by",
             self.format("using the .other file", color=BLUE, weight=BOLD))
