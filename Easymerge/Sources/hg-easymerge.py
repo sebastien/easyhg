@@ -249,7 +249,6 @@ class ConsoleUI(urwide.Handler):
         self.ops.ask     = self.ask
         self.ops.warning = self.log
         self.ops.color   = False
-        # Creation of the console UI
         self.ui = urwide.Console()
         self.ui.handler(self)
         self.ui.data.conflicts = conflicts
@@ -257,9 +256,12 @@ class ConsoleUI(urwide.Handler):
         self.ui.strings.UNRESOLVED = "UNRESOLVED [V]iew [M]erge [K]eep [U]pdate [Q]uit"
 
     def main( self ):
-        self.ui.parse(CONSOLE_STYLE, CONSOLE_UI)
-        self.updateConflicts()
-        self.ui.main()
+        if self.ui.data.conflicts.all():
+            self.ui.parse(CONSOLE_STYLE, CONSOLE_UI)
+            self.updateConflicts()
+            self.ui.main()
+        else:
+            print "No conflicts found."
 
     def conflictStateChanged( self, button, state ):
         if not state == True: return
@@ -331,9 +333,7 @@ class ConsoleUI(urwide.Handler):
 
     def onConflict( self, widget, key ):
         if key in ('left', 'right', 'up', 'down'): return False
-        if key == "q":
-            self.ui.end() 
-            return
+
         conflict = widget.conflict
         if conflict.state == Conflict.RESOLVED:
             # Undoes the conflict
@@ -371,6 +371,18 @@ class ConsoleUI(urwide.Handler):
                 self._updateConflictView(conflict)
             else:
                 return False
+
+    def onKeyPress( self, widget, key ):
+        if  key == "q":
+            self.ui.end() 
+            return
+        elif key == "c":
+            if not self.ui.data.conflicts.unresolved():
+                # TODO: Detect if commit was successful or not
+                #self.ui.end()
+                #res = os.popen("hg commit").read()
+                pass
+
 
     # Operations bindings
     # ------------------------------------------------------------------------
