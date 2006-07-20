@@ -8,7 +8,7 @@
 # License   : GNU Public License         <http://www.gnu.org/licenses/gpl.html>
 # -----------------------------------------------------------------------------
 # Creation  : 10-Jul-2006
-# Last mod  : 15-Jul-2006
+# Last mod  : 20-Jul-2006
 # -----------------------------------------------------------------------------
 
 import sys, os, re, time, stat, tempfile
@@ -32,21 +32,16 @@ consistency of commits.
 
 # ------------------------------------------------------------------------------
 #
-# CURSES INTERFACE
+# CONSOLE INTERFACE
 #
 # ------------------------------------------------------------------------------
 
-CHOICES = {
-	"edit_state":["WIP", "UNSTABLE", "STABLE", "RELEASE"],
-	"edit_type": ["Feature", "Bugfix", "Refactor"]
-}
-
-STYLE = """\
+CONSOLE_STYLE = """\
 Frame         : WH, DB, SO
 header        : WH, DC, BO
-footer        : LG, DB, SO
-info          : WH, Lg, BO
-tooltip       : Lg, DB, SO
+footer        : WH, DB, SO
+info          : BL, DC, SO
+tooltip       : Lg, DB, BO
 
 label         : Lg, DB, SO
 title         : WH, DB, BO
@@ -64,39 +59,37 @@ Text*         : WH, DM, BO
 #edit_summary : YL, DB, SO
 """
 
-UI = """\
+CONSOLE_UI = """\
 Hdr MERCURIAL - Easycommit %s
 
-Edt  Name          [$USERNAME]      #edit_user
-Edt  Summary       [One line commit summary]     #edit_summary &key=sumUp
-Edt  Tags          [Stable, WIP]
+Edt  Name          [$USERNAME]                   #edit_user
+Edt  Summary       [One line commit summary]     #edit_summary ?SUMMARY &key=sumUp
+Edt  Tags          [WIP, Feature]                #edit_tags    ?TAGS    &key=tag
 Dvd ___
 
-Ple                                 #changes 
+Edt  [Commit description]                        #edit_desc    ?DESC &key=describe multiline=True
+Dvd ___
+
+Ple                                               #changes 
 End
-Dvd ___
 
-Edt  [Notes] #edit_desc multiline=True
-Dvd ___
-
-GFl                                 align=RIGHT
-Btn [Commit]                        #btn_commit &press=commit
-End
+Ftr [C]ommit [S]ave [Q]uit
 	""" % (__version__)
 
-class Interface:
+class ConsoleUI:
 	"""Main user interface for easycommit."""
 
 	def __init__(self):
-		self.ui = urwide.UI()
-		self.defaultHandler = Handler()
+		self.ui = urwide.Console()
+		self.defaultHandler = ConsoleUIHandler()
 		self.ui.handler(self.defaultHandler)
-		self.ui.strings.STATES      = "LEFT/- or RIGHT/+ to select a project state"
-		self.ui.strings.TYPE        = "LEFT/- or RIGHT/+ to select a project type"
-		self.ui.strings.CHANGE      = "[v] review differences"
+		self.ui.strings.DESC    = "Describe your changes in detail here"
+		self.ui.strings.SUMMARY = "Give a one-line summary of your changes"
+		self.ui.strings.TAGS    = "Tags allow you to explicitly state specific aspects of your commit."
+		self.ui.strings.CHANGE  = "[v] review differences"
 
 	def main( self, commit = None ):
-		self.ui.parse(STYLE, UI)
+		self.ui.parse(CONSOLE_STYLE, CONSOLE_UI)
 		self.ui.DEFAULT_SUMMARY     = self.ui.widgets.edit_summary.get_edit_text()
 		self.ui.DEFAULT_DESCRIPTION = self.ui.widgets.edit_desc.get_edit_text()
 		self.ui.data.commit = commit
@@ -108,20 +101,22 @@ class Interface:
 		return self.defaultHandler.selectedChanges()
 
 	def commitMessage( self ):
+		summ = self.ui.widgets.edit_summary.get_edit_text()
+		tags = self.ui.widgets.edit_tags.get_edit_text()
 		desc = self.ui.widgets.edit_desc.get_edit_text() 
 		desc = desc.replace("\n\n", "\n")
-		msg = "%s: %s\n%sChanges type: %s\n" % (
-			self.ui.widgets.edit_state.get_edit_text(),
-			self.ui.widgets.edit_summary.get_edit_text(),
+		if tags: tags = "\n[TAGS] " + tags
+		msg = "%s\n\n%s%s" % (
+			summ,
 			desc,
-			self.ui.widgets.edit_type.get_edit_text(),
+			tags,
 		)
 		return msg
 
 	def commitUser( self ):
 		return self.ui.widgets.edit_user.get_edit_text()
 
-class Handler(urwide.Handler):
+class ConsoleUIHandler(urwide.Handler):
 	"""Main event handler."""
 
 	def onSave( self, button ):
@@ -135,47 +130,46 @@ class Handler(urwide.Handler):
 		self.ui.tooltip("Commit")
 		self.ui.end()
 
-	def onChangeDescription( self, widget, oldtext, newtext ):
-		pass
-
-	def onCycle( self, widget, key ):
-		name    = self.ui.id(widget)
-		choices = CHOICES[name]
-		current = choices.index(widget.get_edit_text())
-		if key == "left" or key == "-":
-			current = ( current-1 ) % (len(choices))
-			widget.set_edit_text(choices[current])
-		elif key == "right" or key == "+":
-			current = ( current+1 ) % (len(choices))
-			widget.set_edit_text(choices[current])
-		elif key in ("up", "down"):
-			return False
-		else:
-			return True
-
 	def onSumUp( self, widget, key ):
 		if hasattr(widget, "_alreadyEdited"): return False
-		if key in ("left", "right", "up", "down"): return False
+		if key in ("left", "right", "up", "down", "tab", "shift tab"): return False
+		widget.set_edit_text("")
+		widget._alreadyEdited = True
+		return False
+
+	def onTag( self, widget, key ):
+		if hasattr(widget, "_alreadyEdited"): return False
+		if key in ("left", "right", "up", "down", "tab", "shift tab"): return False
 		widget.set_edit_text("")
 		widget._alreadyEdited = True
 		return False
 
 	def onDescribe( self, widget, key ):
-		if key in ("left", "right", "up", "down"):
+		if key in ("left", "right", "up", "down", "tab", "shift tab"): 
 			return False
 		if not hasattr(widget, "_alreadyEdited"):
 			widget.set_edit_text("")
 			widget._alreadyEdited = True
 		return False
 
-	def onFormatDescription( self, widget, previous, text ):
-		if previous == text: return False
-		# We adjust the text width
-		while len(text) > 1 and text[-1] == "\n" and text[-2] == "\n": text = text[:-1]
-		widget.set_edit_text(text)
-
 	def onChangeInfo( self, widget ):
 		self.ui.tooltip(widget.commitEvent.info())
+		self.ui.info("[V]iew changes")
+	
+	def onChange( self, widget, key ):
+		if key == "v":
+			self.reviewFile(widget.commitEvent)
+		else:
+			return False
+
+	def onKeyPress( self, widget, key ):
+		if key == "q":
+			sys.exit(0)
+		elif key == "s":
+			self.ui.tooltip("Not implemented yet")
+		elif key == "c":
+			self.ui.end()
+		return False
 
 	# SPECIFIC ACTIONS
 	# _________________________________________________________________________
@@ -189,15 +183,18 @@ class Handler(urwide.Handler):
 		# Iterates on evnets and registers checkboxes
 		for event in commit.events:
 			checkbox = self.ui.new(urwid.CheckBox, "%-10s %s" %(event.name, event.path), True)
+			self.ui.unwrap(checkbox).commitEvent = event
 			changes.add_widget(self.ui.wrap(checkbox, "?CHANGE &focus=changeInfo"))
-			checkbox.commitEvent = event
+			self.ui.onFocus(checkbox, "changeInfo")
+			self.ui.onKey(checkbox, "change")
 		self.ui.widgets.changes.set_focus(0)
 
 	def reviewFile( self, commitEvent ):
 		parent_rev = commitEvent.parentRevision()
 		fd, path   = tempfile.mkstemp(prefix="hg-easycommit")
 		os.write(fd, parent_rev)
-		self.footer("Reviewing differences for " + commitEvent.path)
+		self.ui.tooltip("Reviewing differences for " + commitEvent.path)
+		self.ui.draw()
 		os.popen("gview -df '%s' '%s'" % (commitEvent.abspath(), path)).read()
 		os.close(fd)
 		os.unlink(path)
@@ -356,7 +353,7 @@ def commit_wrapper(repo, files=None, text="", user=None, date=None,
 	for c in removed: commit_object.events.append(RemoveEvent(commit_object, c))
 	if commit_object.events:
 		# And we invoke the commit editor
-		app = Interface()
+		app = ConsoleUI()
 		app.ui.strings.USERNAME = USERNAME
 		app.main(commit_object)
 		files = map(lambda c:c.path, app.selectedChanges())
@@ -364,6 +361,10 @@ def commit_wrapper(repo, files=None, text="", user=None, date=None,
 		if files:
 			repo._old_commit( files, app.commitMessage(), app.commitUser(),
 			date, match, force, lock, wlock, force_editor )
+			print
+			print "Easycommit: Commit successful !"
+			print
+			print os.popen("hg tip").read()
 	else:
 		print "No changes: nothing to commit"
 
