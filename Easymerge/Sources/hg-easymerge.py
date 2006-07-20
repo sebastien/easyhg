@@ -176,17 +176,21 @@ footer        : LG, DB, SO
 info          : WH, Lg, BO
 tooltip       : Lg, DB, SO
 
-label         : Lg, DB, SO
+label         : WH, DB, BO
 
 resolved      : DG, DB, SO
 unresolved    : LR, DB, SO
+
+dialog        : BL, Lg, SO
+dialog.shadow : DB, BL, SO
+dialog.border : Lg, DB, SO
 
 Edit          : WH, DB, BO
 Edit*         : WH, DM, BO
 Button        : LC, DB, BO
 Button*       : WH, DM, BO
-Divider       : DC, DB, SO
-Text          : Lg, DB, SO
+Divider       : LB, DB, SO
+Text          : WH, DB, SO
 Text*         : WH, DM, BO
 
 #edit_summary : DM, DB, SO
@@ -195,8 +199,15 @@ Text*         : WH, DM, BO
 CONSOLE_UI = """\
 Hdr MERCURIAL - Easymerge %s
 
-Txt  Conflicts
-===
+Col                                 
+    Txt Path
+    Txt Status
+    Txt Choosen version
+
+
+End
+___
+
 Col                                 #conflicts
     Ple                             #conflict
     End
@@ -209,35 +220,61 @@ Col                                 #conflicts
     Ple                             #other
     End
 End
-===
-GFl
-Btn  [Quit]
-End
 """ % (__version__)
+
+
+ASK_RESOLVED = """
+Hdr Conflict resolution
+
+Txt Did you resolve the conflict ?
+
+GFl
+    Btn [Yes]                       #yes
+    Btn [No]                        #no
+End
+"""
 
 class ConsoleUI(urwide.Handler):
     """Main user interface for easymerge."""
 
     def __init__(self, conflicts):
         urwide.Handler.__init__(self)
+        # Operations configuration for Console UI
         self.ops = Operations(conflicts)
-        self.ui = urwide.UI()
+        self.ops.command = self.command
+        self.ops.output  = self.log
+        self.ops.info    = self.log
+        self.ops.log     = self.log
+        self.ops.error   = self.log
+        self.ops.ask     = self.ask
+        self.ops.warning = self.log
+        self.ops.color   = False
+        # Creation of the console UI
+        self.ui = urwide.Console()
         self.ui.handler(self)
         self.ui.data.conflicts = conflicts
-        self.ui.strings.RESOLVED   = "[U]ndo [V]iew"
-        self.ui.strings.UNRESOLVED = "[R]esolve [U]pdate [K]eep [V]iew"
+        self.ui.strings.RESOLVED   = "[U]ndo [R]eview"
+        self.ui.strings.UNRESOLVED = "[V]iew [M]erge [K]eep [U]pdate"
 
     def main( self ):
         self.ui.parse(CONSOLE_STYLE, CONSOLE_UI)
         self.updateConflicts()
         self.ui.main()
 
+    def conflictStateChanged( self, button, state ):
+        if not state == True: return
+        conflict = button.conflict
+        conflict._ui_state.set_text(('resolved', "RESOLVED"))
+
     def updateConflicts( self ):
+        # Utility classes to manage the widgets
         def clear( widget ):
             self.ui._widgets[widget].remove_widgets()
         def add( conflict, parent, *args ):
             widget = self.ui.new(*args)
-            widget.conflict = widget
+            if isinstance(widget, urwid.RadioButton):
+                widget.on_state_change = self.conflictStateChanged
+            self.ui.unwrap(widget).conflict = conflict
             self.ui._widgets[parent].add_widget(widget)
             return widget
         def finish( widget ):
@@ -245,19 +282,99 @@ class ConsoleUI(urwide.Handler):
         map(clear, "conflict state current parent other".split())
         # We register the conflicts
         for c in self.ui.data.conflicts.all():
-            add(c, "conflict", urwid.Edit, c.path())
-            add(c, "state",    urwid.Text, c.state)
-            add(c, "current",  urwid.CheckBox, "current", False)
-            add(c, "parent",   urwid.CheckBox, "parent", False)
-            add(c, "other" ,   urwid.CheckBox, "other", False)
+            group = []
+            edit  = add(c, "conflict", urwid.Edit, c.path())
+            state = add(c, "state",    urwid.Text, (c.state.lower(), c.state))
+            cur   = add(c, "current",  urwid.RadioButton, group, "merged", False)
+            par   = add(c, "parent",   urwid.RadioButton, group, "parent", False)
+            oth   = add(c, "other" ,   urwid.RadioButton, group, "other",  False)
+            c._ui_state = state
+            c._ui_group = group
+            for w in (edit, cur, par, oth):
+                self.ui.setTooltip(w, c.state.upper())
+                self.ui.onKey(w, self.onConflict)
+                self.ui.onFocus(w, self.onConflictFocus)
+            self._updateConflictView(c)
             #conflict.add_widget(self.ui.wrap(conflict, "@unresolved &key=resolve ?UNRESOLVED"))
         map(finish, "conflict state current parent other".split())
 
-    def onResolve( self, widget, key ):
-        if key in ("up", "down"): return False
-        if key == "r":
-            self.ops.resolveConflict( widget.conflict.number)
 
+    def _updateConflictView( self, conflict ):
+        if conflict.state == Conflict.UNRESOLVED:
+            map(lambda w:w.set_state(False), conflict._ui_group)
+        else:
+            map(lambda w:w.set_state(False), conflict._ui_group)
+            resolution    = conflict.resolutionType()
+            if   resolution == Conflict.PARENT:
+                conflict._ui_group[1].set_state( True )
+            elif resolution == Conflict.OTHER:
+                conflict._ui_group[2].set_state( True )
+            else:
+                conflict._ui_group[0].set_state( True )
+
+    def onConflictFocus( self, widget ):
+        if widget.conflict.state == Conflict.RESOLVED:
+            self.ui.setTooltip(widget, "RESOLVED")
+        else:
+            self.ui.setTooltip(widget, "UNRESOLVED")
+
+    def onConflict( self, widget, key ):
+        if key in ('left', 'right', 'up', 'down'): return False
+        conflict = widget.conflict
+        if conflict.state == Conflict.RESOLVED:
+            # Undoes the conflict
+            if   key == "u": 
+                self.ops.undo(conflict.number)
+                conflict._ui_state.set_text((conflict.state.lower(), conflict.state))
+                self._updateConflictView(conflict)
+            # Reviews what as changed
+            elif key == "enter" or key == "r":
+                widget.set_state (True)
+                self.ops.reviewConflict(conflict)
+            else:
+                return False
+        else:
+            # Reviews the conflict
+            if   key == "v": 
+                self.ops.reviewConflict( widget.conflict.number)
+            # Merges the parent and other manually
+            elif key == "m":
+                self.ops.resolveConflict( widget.conflict.number, "merge")
+                self._updateConflictView(conflict)
+            # Takes the other version
+            elif key == "u":
+                self.ops.resolveConflict( widget.conflict.number, "update")
+                self._updateConflictView(conflict)
+            # Keeps the parent version
+            elif key == "k":
+                self.ops.resolveConflict( widget.conflict.number, "update")
+                self._updateConflictView(conflict)
+            # Selects the current choice
+            elif key == "enter" or key == "space":
+                group = conflict._ui_group
+                if widget == group[0]: self.onConflict(widget, "m")
+                elif widget == group[1]: self.onConflict(widget, "k")
+                elif widget == group[2]: self.onConflict(widget, "u")
+                else: raise "FUCK" + str(widget)
+                self._updateConflictView(conflict)
+            else:
+                return False
+
+    # Operations bindings
+    # ------------------------------------------------------------------------
+
+    def ask( self, message ):
+        return "y"
+
+    def command( self, command ):
+        os.popen(command).read()
+
+    def format( self, format, **kwargs ):
+        return format
+
+    def log( self, *args ):
+        self.ui.info(" ".join(map(str, args)))
+        self.ui.draw()
 
 # -----------------------------------------------------------------------------
 #
@@ -268,9 +385,12 @@ class ConsoleUI(urwide.Handler):
 class Conflict:
     """Represents a conflict between two files."""
 
-    RESOLVED   = "resolved"
-    UNRESOLVED = "unresolved"
+    RESOLVED   = "RESOLVED"
+    UNRESOLVED = "UNRESOLVED"
     SEPARATOR  = "--vs--"
+    PARENT     = "parent"
+    OTHER      = "other"
+    MERGED     = "merged"
 
     def __init__( self, number, path, state=None ):
         if not state: state = Conflict.UNRESOLVED
@@ -297,6 +417,24 @@ class Conflict:
     def other( self ):
         return self._path + ".other"
 
+    def _read( self, path ):
+        f = file(path, 'r')
+        r = f.read()
+        f.close()
+        return r
+
+    def resolutionType( self ):
+        assert self.state == self.RESOLVED
+        c = self._read(self.path())
+        p = self._read(self.parent())
+        o = self._read(self.other())
+        if c == p:
+            return self.PARENT
+        elif c == o:
+            return self.OTHER
+        else:
+            return self.MERGED
+        
     @staticmethod
     def parse( line, number=-1 ):
         """Returns a new conflict from the given conflict string
@@ -404,7 +542,7 @@ class Conflicts:
         self._conflicts.append(conflict)
         return conflict
 
-    def asString(self, color=True):
+    def asString(self, color=False):
         res = ""
         unresolved       = self.unresolved()
         resolved         = self.resolved()
@@ -439,6 +577,7 @@ class Operations:
 
     def __init__( self, conflicts ):
         self.conflicts = conflicts
+        self.color     = True
 
     def output( self, message ):
         print message
@@ -473,7 +612,21 @@ class Operations:
 
     def listConflicts( self ):
         """Lists the conflicts in the given directory."""
-        self.output(self.conflicts.asString())
+        self.output(self.conflicts.asString(self.color))
+
+    def viewResolvedConflict( self, number ):
+        """Reviews the given conflict, by comparing its current revision to the
+        parent revision."""
+        if isinstance(number, Conflict):conflict  = number
+        else:  conflict  = self.conflicts.unresolved(number)
+        self.command("%s %s %s" % (MERGETOOL, conflict.path(), conflict.parent()))
+        
+    def reviewConflict( self, number ):
+        """Reviews the given conflict, by comparing its current revision to the
+        parent revision."""
+        if isinstance(number, Conflict):conflict  = number
+        else:  conflict  = self.conflicts.unresolved(number)
+        self.command("%s %s %s" % (MERGETOOL, conflict.parent(), conflict.other()))
 
     def resolveConflict( self, number, action="merge"):
         """Resolves the given conflict by merging at first."""
@@ -487,7 +640,7 @@ class Operations:
             self.warning("Conflict already resolved. Doing nothing.")
             return
         # Resolving the conflict
-        conflict_file = format(conflict.path(),color=RED)
+        conflict_file = self.format(conflict.path(),color=RED)
         if   action == "merge":
             self.log("Resolving conflict", conflict_file ,"by",
             self.format("manual merging",color=BLUE,  weight=BOLD))
