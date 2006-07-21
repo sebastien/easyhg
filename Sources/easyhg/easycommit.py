@@ -75,8 +75,8 @@ End
 Dvd ___
 
 GFl
-	Btn [Commit]                                  #btn_commit  &press=commit
 	Btn [Cancel]                                  #btn_cancel  &press=cancel
+	Btn [Commit]                                  #btn_commit  &press=commit
 End
 
 	""" % (__version__)
