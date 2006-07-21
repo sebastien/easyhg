@@ -72,6 +72,12 @@ Dvd ___
 
 Ple                                               #changes 
 End
+Dvd ___
+
+GFl
+	Btn [Commit]                                  #btn_commit  &press=commit
+	Btn [Cancel]                                  #btn_cancel  &press=cancel
+End
 
 Ftr [C]ommit [S]ave [Q]uit
 	""" % (__version__)
