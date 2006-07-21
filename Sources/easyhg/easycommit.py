@@ -79,7 +79,6 @@ GFl
 	Btn [Cancel]                                  #btn_cancel  &press=cancel
 End
 
-Ftr [C]ommit [S]ave [Q]uit
 	""" % (__version__)
 
 class ConsoleUI:
@@ -92,7 +91,7 @@ class ConsoleUI:
 		self.ui.strings.DESC    = "Describe your changes in detail here"
 		self.ui.strings.SUMMARY = "Give a one-line summary of your changes"
 		self.ui.strings.TAGS    = "Tags allow you to explicitly state specific aspects of your commit."
-		self.ui.strings.CHANGE  = "[v] review differences"
+		self.ui.strings.CHANGE  = "[V]iew [C]ommit [S]ave [Q]uit"
 
 	def main( self, commit = None ):
 		self.ui.parse(CONSOLE_STYLE, CONSOLE_UI)
@@ -160,7 +159,7 @@ class ConsoleUIHandler(urwide.Handler):
 
 	def onChangeInfo( self, widget ):
 		self.ui.tooltip(widget.commitEvent.info())
-		self.ui.info("[V]iew changes")
+		self.ui.info(self.ui.strings.CHANGE)
 	
 	def onChange( self, widget, key ):
 		if key == "v":
@@ -170,11 +169,11 @@ class ConsoleUIHandler(urwide.Handler):
 
 	def onKeyPress( self, widget, key ):
 		if key == "q":
-			sys.exit(0)
+			self.onCancel(widget)
 		elif key == "s":
-			self.ui.tooltip("Not implemented yet")
+			self.onSave(widget)
 		elif key == "c":
-			self.ui.end()
+			self.onCommit(widget)
 		return False
 
 	# SPECIFIC ACTIONS
