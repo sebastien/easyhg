@@ -8,7 +8,7 @@
 # Author    : Sébastien Pierre                           <sebastien@xprima.com>
 # -----------------------------------------------------------------------------
 # Creation  : 10-Jul-2006
-# Last mod  : 20-Jul-2006
+# Last mod  : 21-Jul-2006
 # -----------------------------------------------------------------------------
 
 import sys, os, re, time, stat, tempfile
