@@ -113,7 +113,7 @@ class ProjectRepository(Repository):
 		if self.description():
 			text += "description: %s\n" % (self.description())
 		text += "state:       %s\n" % (", ".join(self.qualifiers()))
-		text += "path:        %s\n" % (self.path())
+		text += "current:     %s\n" % (self.path())
 		owners		 = self.owners()
 		developers	 = self.developers()
 		if   len(owners) == 0:
@@ -239,23 +239,13 @@ class DevelopmentRepository(ProjectRepository):
 		"""Tells wether this repository has outgoing changesets."""
 		return self._repo.findoutgoing(self._parent._repo)
 
-	def summary( self ):
-		"""Returns a text summary of this repository"""
-		lines = list(ProjectRepository.summary(self).split("\n"))
-		meta  = [self.type()]
-		meta.extend(self.qualifiers())
-		if not self.isSynchronized(): meta.append("out of sync")
-		if self.isModified(): meta.append("modified")
-		lines[0] = "name:        %s (%s)" % (self.name(), ", ".join(meta))
-		lines.insert(3, "parent:      " + self._parent._path)
-		return "\n".join(lines)
-
 	def qualifiers( self ):
 		"""Returns a list of qualifiers that describe the state of the central
 		project relatively to the children repositories."""
 		res = ProjectRepository.qualifiers(self)
 		qualifiers         = {}
-		last_change        = tuple(self.parent().changes(1))[0]
+		# FIXME: This does not work
+		last_change        = tuple(self.changes(1))[0]
 		parent_last_change = tuple(self.parent().changes(1))[0]
 		cauthor, ctime, cdate, desc, cfiles = last_change
 		if last_change == parent_last_change:
@@ -269,6 +259,19 @@ class DevelopmentRepository(ProjectRepository):
 			qualifiers["up to date"] = True
 		res.extend(qualifiers.keys())
 		return res
+
+	def summary( self ):
+		"""Returns a text summary of this repository"""
+		# Qualifiers
+		meta  = [self.type()]
+		meta.extend(self.qualifiers())
+		if not self.isSynchronized(): meta.append("out of sync")
+		if self.isModified(): meta.append("modified")
+		# Summary
+		lines = list(ProjectRepository.summary(self).split("\n"))
+		lines[0] = "name:        %s (%s)" % (self.name(), ", ".join(meta))
+		lines.insert(3, "parent:      " + self.parent().url())
+		return "\n".join(lines)
 
 # ------------------------------------------------------------------------------
 #
@@ -355,32 +358,39 @@ class Commands:
 	"""This defines the set of Mercurial commands that constitute the project
 	extension."""
 
+	COMMANDS = "info|status|parent|children|clone|help".split("|")
+
 	def __init__(self):
 		pass
 
 	def parent(self, ui, repo, *args, **opts):
 		if args:
 			parent_path = args[0]
-			parent_repo = Repository_load(parent_path)
-			if parent_repo:
-				if isinstance(parent_repo, DevelopmentRepository):
-					ui.write("Using given development parent repository instead\n")
-					parent_repo = parent_repo.parent()
-				# We set the parent repository
-				repo.setParent(parent_path)
-				try:
-					parent_repo.addChild(repo)
-				except Repository.ConfigurationException, e:
-					ui.write("ERROR: " + str(e) + "\n")
-					ui.write("Set your project URL (in Mercurial syntax).\n")
-					ui.write("Ex: hg project set url=ssh://myip/myrepo\n")
-					return
-				# TODO: The parent directory should be notified of children
-				# And save both configurations
-				repo.config.save()
-				parent_repo.config.save()
+			if len(args) == 1 and not parent_path in self.COMMANDS:
+				parent_repo = Repository_load(parent_path)
+				if parent_repo:
+					if isinstance(parent_repo, DevelopmentRepository):
+						ui.write("Using given development parent repository instead\n")
+						parent_repo = parent_repo.parent()
+					# We set the parent repository
+					repo.setParent(parent_path)
+					try:
+						parent_repo.addChild(repo)
+					except Repository.ConfigurationException, e:
+						ui.write("ERROR: " + str(e) + "\n")
+						ui.write("Set your project URL (in Mercurial syntax).\n")
+						ui.write("Ex: hg project set url=ssh://myip/myrepo\n")
+						return
+					# TODO: The parent directory should be notified of children
+					# And save both configurations
+					repo.config.save()
+					parent_repo.config.save()
 			else:
-				self.main(ui, repo, *args, **opts)
+				parent_repo = repo.parent()
+				if not parent_repo:
+					ui.write("Cannot find parent repository")
+				else:
+					self.main(ui, parent_repo, *args, **opts)
 		else:
 			if isinstance(repo, CentralRepository):
 				ui.warn("This is a central repository, it has no parent\n")
@@ -393,15 +403,24 @@ class Commands:
 		for arg in args:
 			if arg.find("=")!=-1 and len(arg.split("=")) == 2:
 				key, value = map(string.strip, arg.split("="))
-				key = "project." + key
-				old = repo._property(key)
-				if old == value:
-					ui.write("Value '%s' already set to %s\n" % (key, old))
+				# For the "autoupdate" key, we set the autoupdate command
+				if key == "autoupdate":
+					if value.strip().lower() == "yes":
+						repo.config.update("hooks", "incoming", "hg update -C $HG_NODE\n")
+						ui.write("Incoming hook set to: hg update -C $HG_NODE\n")
+					else:
+						old = repo.config.unset("hooks", "incoming")
+						ui.write("Incoming hook unset: was " + old + "\n")
 				else:
-					repo._property(key, value)
-					if old == None: old = ""
-					else: old = " (was %s)" % (old)
-					ui.write("Setting '%s' to '%s'%s\n" % (key, value, old))
+					key = "project." + key
+					old = repo._property(key)
+					if old == value:
+						ui.write("Value '%s' already set to %s\n" % (key, old))
+					else:
+						repo._property(key, value)
+						if old == None: old = ""
+						else: old = " (was %s)" % (old)
+						ui.write("Setting '%s' to '%s'%s\n" % (key, value, old))
 			else:
 				raise Exception("Bad argument: " + arg)
 			repo.config.save()

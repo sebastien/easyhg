@@ -82,6 +82,16 @@ class Configuration:
 		else:
 			return None
 
+	def unset( self, sectionName, name ):
+		section = self.section(sectionName)
+		if section:
+			for property_value in section:
+				if property_value[0] == name:
+					section.remove(property_value)
+					self._updated["%s.%s" % (sectionName, name)] = None
+					return property_value[1]
+		return None
+
 	def isUpdated( self ):
 		"""Tells wether this configuration was updated since the last saving."""
 		return self._updated
@@ -287,7 +297,9 @@ class Repository:
 			self.config   = Configuration(self)
 		except Configuration.NotFound:
 			self.config   = Configuration()
-			
+		# Now we bind protocol-specific method
+		if self.isSSH():
+			self.changes = self._ssh_changes
 
 	def isLocal( self ):
 		return isinstance(self._repo, mercurial.localrepo.localrepository)
@@ -295,11 +307,8 @@ class Repository:
 	def isSSH( self ):
 		if not isinstance(self._repo, mercurial.sshrepo.sshrepository):
 			return False
-		# This returns the proper SSH arguments to for the repository location
-		args = self._repo.user and ("%s@%s" % (self._repo.user, self._repo.host)) or self._repo.host
-		args = self._repo.port and ("%s -p %s") % (args, self._repo.port) or args
-		return args
-
+		return self._ssh_location()
+		
 	# ACCESSORS
 	# _________________________________________________________________________
 
@@ -316,6 +325,12 @@ class Repository:
 		if path.endswith(".hg"):  path = path[:-3]
 		if path.endswith("/"):    path = path[:-1]
 		return path
+	
+	def url(self):
+		if self.isSSH():
+			return self.hgrepo().url
+		else:
+			return self.path()
 
 	def count( self ):
 		"""Returns the number of changes in this repository."""
@@ -356,7 +371,7 @@ class Repository:
 		"""Gets a property set in this project configuration"""
 		section, _property = name.split(".")
 		if value == None:
-			return self._ui.config(section, _property)
+			return self.config.get(section, _property) or self._ui.config(section, _property)
 		else:
 			if add:
 				p = self._property(name)
@@ -370,5 +385,45 @@ class Repository:
 	def _properties( self, name=None ):
 		"""Sets a property in this project configuration"""
 		return map(string.strip, str(self._property(name)).split())
+
+	# SSH
+	# _________________________________________________________________________
+
+	def _ssh_location( self ):
+		# This returns the proper SSH arguments to for the repository location
+		args = self._repo.user and ("%s@%s" % (self._repo.user, self._repo.host)) or self._repo.host
+		args = self._repo.port and ("%s -p %s") % (args, self._repo.port) or args
+		return args
+
+	def _ssh( self, cmd ):
+		"""Runs the given command through SSH and returns the result"""
+		assert self.isSSH()
+		sshcmd  = self._repo._ui.config("ui", "ssh", "ssh")
+		sshcmd += " " + self._repo.isSSH()
+		return os.popen(sshcmd + " " + cmd).read()
+
+	def _sshhg( self, cmd ):
+		"""Runs the given command through SSH and returns the result"""
+		assert self.isSSH()
+		sshcmd     = self.config.get("ui", "ssh") or "ssh"
+		remotecmd  = self.config.get("ui", "remotecmd") or "hg"
+		sshcmd    += " " + self.isSSH()
+		return os.popen(sshcmd + " " + remotecmd + " " + cmd).read()
+
+	def _ssh_changes( self, n=None ):
+		"""Yields the n (all by default) latest changes in this
+		repository. Each change is returned as (author, date, description, files)"""
+		changes = self._sshhg("log -v")
+		changes = changes.split("changeset:")
+		for change in changes:
+			if not change.strip(): continue
+			changeset = change.split("\n")
+			revnum, chash = changeset[0].split(":")
+			cauthor       = changeset[1].split(":", 1)[1].strip()
+			cdate         = changeset[2].split(":", 1)[1].strip()
+			ctime         = cdate
+			cfiles        = changeset[3].split(":", 1)[1].split()
+			cdesc         = "\n".join(changeset[5:-1])
+			yield cauthor, ctime, cdate, cdesc, cfiles
 
 # EOF
