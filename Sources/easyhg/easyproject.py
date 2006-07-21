@@ -2,24 +2,27 @@
 # Encoding: iso-8859-1
 # vim: tw=80 ts=4 sw=4 fenc=latin-1 noet
 # -----------------------------------------------------------------------------
-# Project   : Mercurial - Project extension
-# -----------------------------------------------------------------------------
-# Author   : Sébastien Pierre                            <sebastien@xprima.com>
-# -----------------------------------------------------------------------------
+# Project   : Mercurial - Easy tools
 # License   : GNU Public License         <http://www.gnu.org/licenses/gpl.html>
+# -----------------------------------------------------------------------------
+# Author    : Sébastien Pierre                           <sebastien@xprima.com>
+# -----------------------------------------------------------------------------
 # Creation  : 01-Jun-2006
-# Last mod  : 10-Jul-2006
+# Last mod  : 21-Jul-2006
 # -----------------------------------------------------------------------------
 
-import sys
+import sys, os, string, time
 try:
-	from mercurial.demandload import demandload
-	from mercurial.i18n import gettext as _
+	import mercurial.ui, mercurial.hg, mercurial.commands
 except:
 	print "Failed to load Mercurial modules."
 	sys.exit(-1)
 
-demandload(globals(), 'mercurial.ui mercurial.hg mercurial.commands os string time')
+try:
+	from easyhg.easyapi import Repository, expand_path
+except:
+	print "Failed to load Mercurial-Easy modules."
+	sys.exit(-1)
 
 # TODO: Add default-push for working repositories
 
@@ -35,167 +38,54 @@ Mercurial repository information.
 
 # ------------------------------------------------------------------------------
 #
-# TOOLS
-#
-# ------------------------------------------------------------------------------
-
-def update_configuration( path, values ):
-	"""Updates the [project] section of the Mercurial configuration to be filled
-	with the given set of values. If the section does not exist, it will be
-	appended, if it already exists, it will be rewrited."""
-	# The given configuration file may not exist
-	if not os.path.isfile(path): text = ""
-	else: f = open(path, 'r') ; text = f.read() ; f.close()
-	result          = []
-	current_section = None
-	sections        = {}
-	# For every line of the Mercurial RC file
-	for line in text.split("\n"):
-		# If we are in a section, we log it
-		if line.strip().startswith("["):
-			current_section = line.strip()[1:-1].strip().lower()
-			result.append(line)
-			last_section = {}
-			sections[current_section] = True
-			# We take care of the paths.default-push
-			if current_section == "paths" and values.get("parent"):
-				result.append("default-push = %s" % (values["parent"]))
-		# We skip the [project] section
-		elif current_section == "project":
-			for key, value in values.items():
-				result.append("%s = %s" % (key, value))
-			current_section = "SKIP"
-		# We skip the [paths] default-push
-		elif current_section == "paths" and values.get("parent"):
-			if line.strip().lower().startswith("default-push"): pass
-			else: result.append(line)
-		elif current_section == "SKIP":
-			pass
-		else:
-			result.append(line)
-	# If there was no project section, we create it
-	if not sections.get("project"):
-		result.append("[project]")
-		for key, value in values.items():
-			result.append("%s = %s" % (key, value))
-	# We add a paths sections with default-push if necessary
-	if not sections.get("paths") and values.get("parent"):
-		result.append("[paths]")
-		result.append("default-push = %s" % (values["parent"]))
-
-	text = "\n".join(result)
-	f = open(path, 'w') ; f.write(text) ; f.close()
-	# Returns the result as text
-	return text
-
-def expand_path( path ):
-	"""Expands env variables and ~ symbol into the given path, and makes it
-	absolute."""
-	path = os.path.expanduser(path)
-	path = string.Template(path).substitute(os.environ)
-	return os.path.abspath(path)
-
-# ------------------------------------------------------------------------------
-#
 # REPOSITORIES
 #
 # ------------------------------------------------------------------------------
-
-class RepositoryException(Exception): pass
 
 def Repository_load( path ):
 	"""Creates a Central or a Working repository instance depending on the
 	repository type."""
 	repo = Repository(path)
-	if repo.get("parent"): repo = DevelopmentRepository(path)
+	if repo._property("project.parent"): repo = DevelopmentRepository(path)
 	else: repo = CentralRepository(path)
 	return repo
 
-def Repository_locate( path="." ):
-	path	 = os.path.abspath(path)
-	print path
-	old_path = None
-	while old_path != path:
-		hg_path  = os.path.join(path, ".hg")
-		if os.path.isdir(hg_path): return path
-		old_path = path
-		path	 = os.path.dirname(path)
-	return None
+class ProjectRepository(Repository):
+	"""This specific repository subclass offers an easy way to manipulate
+	additional project meta-information managed by the easyproject extension."""
 
-class Repository:
-	"""The Repository class abstracts Mercurial repositories under a simple API
-	and allows to make the distinction between the Central and Working
-	repository.
-
-	This class was designed to easily give important information about a
-	repository (tags, changes), in a format that can be easily used by UIs."""
+	CENTRAL     = "central"
+	DEVELOPMENT = "development"
 
 	def __init__(self, path=None, repo=None, ui=None):
-		# We remove the .hg from the path, if present
-		# We initialize the UI first
-		if ui:
-			self_ui	= ui
-		# We have to use this trick to make sure the UI configuration is loaded
-		# from the repository path, and not from the current location
-		else:
-			oldrc_path = mercurial.ui.util._rcpath 
-			p = path or repo.path
-			if p.endswith("hgrc"): pass
-			elif p.endswith(".hg"): p = os.path.join(p, "hgrc")
-			else: p = os.path.join(p, ".hg", "hgrc")
-			mercurial.ui.util._rcpath = p
-			self._ui   = mercurial.ui.ui(quiet=True)
-			mercurial.ui.util._rcpath = oldrc_path
-		# And then the repository
-		if repo:
-			self._repo	 = repo
-		else:
-			self._path	 = self._ui.expandpath(path)
-			if self._path.endswith(".hg"):
-				self._path = os.path.dirname(self._path)
-			self._repo	 = mercurial.hg.repository(self._ui, self._path)
-		self._updated	  = {}
+		Repository.__init__(self, path=path, repo=repo, ui=ui)
 		self._owners	   = []
 		self._developers   = []
 
-	def get( self, value ):
-		"""Gets a property of this project"""
-		return self._ui.config("project", value)
-
-	def mget( self, value ):
-		"""Gets a property of with multiple values"""
-		return map(string.strip, str(self.get(value)).split())
-
-	def set( self, name, value ):
-		"""Sets a property for this project (the property has a single
-		value)."""
-		self._ui.setconfig("project", name, value)
-		assert self.get(name) == value
-		self._updated[name] = value
-
-	def add( self, name, value ):
-		"""Adds the given value to the given property."""
-		p = self.get(name)
-		if p: self.set(name, p + ", " + value)
-		else: self.set(name, value)
-
 	def name(self):
-		return self.get("name")
+		"""Returns the project name, if any."""
+		return self._property("project.name")
+
+	def type( self ):
+		raise Exception("Not implemented")
+
+	def parent( self ):
+		raise Exception("Not implemented")
 
 	def description(self):
-		return self.get("description")
-
-	def type(self):
-		raise Exception("Must be implemented by subclass")
+		"""Returns the project description, if any."""
+		return self._property("project.description")
 
 	def owners(self):
+		"""Returns the list of project owners, if any."""
 		if not self._owners:
-			self._owners = self.get("owner") or self.get("owners")
+			self._owners = self._property("project.owner") or self._property("project.owners")
 			if not self._owners: self._owners = []
 			else: self._owners = map(string.strip, self._owners.split(","))
 		return self._owners
 
 	def developers(self):
+		"""Returns the list of project developers, if any."""
 		if not self._developers:
 			authors = {}
 			for changes in self.changes():
@@ -204,54 +94,29 @@ class Repository:
 			self._developers = authors.keys()
 		return self._developers
 
-	def path(self):
-		return expand_path(self._path)
+	def qualifiers( self ):
+		qualifiers = {}
+		if not self.name() and not self.description():
+			qualifiers["unconfigured"] = True
+		return qualifiers.keys()
 
-	def _changesetInfo( self, ref ):
-		changeset  = self._repo.changelog.read(ref)
-		cid, cauthor, ctime, cfiles, cdesc = changeset
-		cauthor = cauthor.strip()
-		cdate	 = time.strftime('%d-%b-%Y', time.gmtime(ctime[0]))
-		cdesc	 = cdesc.replace("'", "''").strip()
-		return cauthor, ctime, cdate, cdesc, cfiles
-
-	def count( self ):
-		"""Returns the number of changes in this repository."""
-		return self._repo.changelog.count()
-
-	def changes( self, n=None ):
-		"""Yields the n (all by default) latest changes in this
-		repository. Each change is returned as (author, date, description, files)"""
-		changes_count = self._repo.changelog.count()
-		if n == None: n = changes_count
-		for i in range(min(n,changes_count)):
-			# We get the changeset node
-			changeset_ref = self._repo.changelog.node(changes_count - i - 1)
-			yield self._changesetInfo(changeset_ref)
-
-	def tags( self ):
-		"""Yields tag name, rev and date for each tag within this repository."""
-		tags = []
-		for name, ref in self._repo.tagslist():
-			cauthor, ctime, cdate, desc, cfiles = self._changesetInfo(ref)
-			tags.append((name, self._repo.changelog.rev(ref), cdate))
-		tags.reverse()
-		return tags
- 
 	def summary( self ):
 		"""Returns a text summary of this repository"""
 		text	= ""
-		text += "name:        %s (%s)\n" % (self.name(), self.type())
-		text += "description: %s\n" % (self.description())
+		if self.name():
+			text += "name:        %s (%s)\n" % (self.name(), self.type())
+		if self.description():
+			text += "description: %s\n" % (self.description())
+		text += "state:       %s\n" % (", ".join(self.qualifiers()))
 		text += "path:        %s\n" % (self._path)
 		owners		 = self.owners()
 		developers	 = self.developers()
 		if   len(owners) == 0:
 			pass
 		elif len(owners) ==1:
-			text += "owner:	   " + owners[0] + "\n"
+			text += "owner:    " + owners[0] + "\n"
 		else:
-			text += "Owners	   " + ", ".join(owners) + "\n"
+			text += "owners    " + ", ".join(owners) + "\n"
 		if   len(developers) == 0:
 			pass
 		elif len(developers) == 1:
@@ -260,31 +125,21 @@ class Repository:
 			text += "developers:  " + str(len(developers)) + "\n"
 		return text
 
-	def updateConfig( self ):
-		"""Updates this repository configuration file to reflect the changes
-		made to the repository."""
-		if not self._updated: return
-		values = {}
-		for key, value in self._ui.configitems("project"): values[key] = value
-		for key, value in self._updated.items(): values[key] = value
-		hgrc = os.path.join(self._path, ".hg", "hgrc")
-		update_configuration(hgrc, values)
-
 # ------------------------------------------------------------------------------
 #
 # CENTRAL PROJECT
 #
 # ------------------------------------------------------------------------------
 
-class CentralRepository(Repository):
-	"""Central repositorys are the "reference" project repositories, where the latest
+class CentralRepository(ProjectRepository):
+	"""Central repositories are the "reference" project repositories, where the latest
 	stable version is stored."""
 
 	def __init__(self, path, config=None):
-		Repository.__init__(self, path)
+		ProjectRepository.__init__(self, path)
 
 	def type(self):
-		return "central"
+		return ProjectRepository.CENTRAL
 
 	def parent(self):
 		"""Returns this repository, as it has no parent."""
@@ -293,13 +148,13 @@ class CentralRepository(Repository):
 	def children(self):
 		"""Returns the absolute path to the child repositories for this central
 		repository."""
-		c = self.mget("children")
+		c = self._properties("projet.children")
 		if c == ["None"]: return []
 		else: return c
 
 	def summary( self ):
 		"""Returns a text summary of this repository"""
-		lines = list(Repository.summary(self).split("\n"))
+		lines = list(ProjectRepository.summary(self).split("\n"))
 		c = self.children()
 		if c:
 			lines.append("children:    %d" % (len(c)))
@@ -308,9 +163,10 @@ class CentralRepository(Repository):
 	def qualifiers( self ):
 		"""Returns a list of qualifiers that describe the state of the central
 		project relatively to the children repositories."""
+		res  = ProjectRepository.qualifiers(self)
 		qualifiers = {}
-		last_change = self.changes(1)
-		cauthor, ctime, cdate, desc, cfiles = last_change
+		last_change = tuple(self.changes(1))
+		cauthor, ctime, cdate, desc, cfiles = last_change[0]
 		for child_repo_path in self.children():
 			child_repo = Repository_load(child_repo_path)
 			other_change = child_repo.change(1)
@@ -318,7 +174,8 @@ class CentralRepository(Repository):
 				qualifiers["incoming change"] = True
 			# TODO: Add branch detection
 			# TODO: Add local changes detection
-		return qualifiers.keys()
+		res.extend(qualifiers.keys())
+		return res
 
 # ------------------------------------------------------------------------------
 #
@@ -326,28 +183,28 @@ class CentralRepository(Repository):
 #
 # ------------------------------------------------------------------------------
 
-class DevelopmentRepository(Repository):
+class DevelopmentRepository(ProjectRepository):
 	
 	def __init__(self, path, config=None):
-		Repository.__init__(self, path)
+		ProjectRepository.__init__(self, path)
 		self._parent = None
 
 	def name(self):
 		return self.parent().name()
 
+	def type(self):
+		return ProjectRepository.DEVELOPMENT
+
 	def description(self):
 		return self.parent().description()
 
-	def type(self):
-		return "development"
-
 	def parent(self):
 		if not self._parent:
-			self._parent = Repository_load(self.get("parent"))
+			self._parent = Repository_load(self._property("project.parent"))
 			# We ensure that this repository is registered in the parent
-			if self._path not in self._parent.mget("children"):
+			if self._path not in self._parent._properties("project.children"):
 				self._parent.add("children", self._path)
-				self._parent.updateConfig()
+				self._parent.saveConfiguration()
 		return self._parent
 
 	def isSynchronized( self ):
@@ -373,6 +230,7 @@ class DevelopmentRepository(Repository):
 	def qualifiers( self ):
 		"""Returns a list of qualifiers that describe the state of the central
 		project relatively to the children repositories."""
+		res = ProjectRepository.qualifiers(self)
 		qualifiers         = {}
 		last_change        = tuple(self.parent().changes(1))[0]
 		parent_last_change = tuple(self.parent().changes(1))[0]
@@ -386,7 +244,9 @@ class DevelopmentRepository(Repository):
 			qualifiers["outgoing change"] = True
 		else:
 			qualifiers["up to date"] = True
-		return qualifiers.keys()
+		res.extend(qualifiers.keys())
+		return res
+
 # ------------------------------------------------------------------------------
 #
 # COMMANDS
@@ -394,15 +254,25 @@ class DevelopmentRepository(Repository):
 # ------------------------------------------------------------------------------
 
 HELP = """\
-project [info|parent|clone]
+project [info|status|parent|children|clone|help]
 
-   Enables easy management of repositories for projects with a central
-   repository and many development repositories related to it.
+   The project command allows easy management of Mercurial repositories in a
+   centralized or semi-centralized style, where there is a notion of "central"
+   repository, and a set of "development" repositories link to this repository.
 
-   A central repository can be given a 'name' and a 'description', and each
-   development repository can be related to by setting the 'parent' property to
-   point to the central repository.
+   Sub-commands:
 
+       info        sets/gets particular project properties (name, description)
+       status      displays the project status (different from hg status)
+       parent      displays the project parent, or do commands in the parent
+       children    displays the list of project children (if project is central)
+       clone       clones the repository, including the project meta-information
+       help        displays detailed help on a particular command
+
+"""
+
+HELP_COMMANDS = {
+"info":"""\
 project info [property=value...]
 
     Displays a summary of the project, and telling wether the current repository
@@ -419,28 +289,37 @@ project info [property=value...]
 
         parent        = path to the parent repository
 
+""",
+"status":"""\
 project status
 
     Displays the status of this repository. This will tell you if there are
     incoming or outgoing changes.
 
+""",
+"parent":"""\
 project parent [COMMAND|LOCATION]
 
     Displays information on this repository parent (only works if
     current repository is a development repository). If a location is given, the
     repository parent is set and the repository becomes a workinf repository.
 
+""",
+"children": """\
 project children
 
      Lists the repositories that are children of this project central
      repository
 
+""",
+"clone": """\
 project clone LOCATION
 
     Clones the central repository for this project to the given location. The
     clone will be a development repository for the project.
 
-""" 
+"""
+}
 
 class Commands:
 	"""This defines the set of Mercurial commands that constitute the project
@@ -462,15 +341,22 @@ class Commands:
 		for arg in args:
 			if arg.find("=")!=-1 and len(arg.split("=")) == 2:
 				key, value = map(string.strip, arg.split("="))
-				old = repo.get(key)
+				old = repo._property(key)
 				repo.set(key, value)
 				ui.write("Setting '%s' to '%s' (was %s)\n" % (key, value, old))
 			else:
 				raise Exception("Bad argument: " + arg)
-			repo.updateConfig()
+			repo.saveConfiguration()
 
 	def help(self, ui, repo, *args, **opts):
-		ui.write(HELP)
+		if not args:
+			ui.write(HELP)
+		else:
+			command_help = HELP_COMMANDS.get(args[0].lower())
+			if not command_help:
+				ui.write(HELP)
+			else:
+				ui.write(command_help)
 
 	def children(self, ui, repo, *args, **opts ):
 		children = repo.parent().children()
@@ -493,10 +379,10 @@ class Commands:
 			sys.exit(-1)
 		# mercurial.commands.clone(ui, ".", destination)
 		# TODO: Should use mercurial.commands once opts problem is fixed
-		os.system("hg clone '%s' '%s'" % (Repository_locate("."), destination))
+		os.system("hg clone '%s' '%s'" % (Repository.locate("."), destination))
 		repo_clone = DevelopmentRepository(destination)
 		repo_clone.set("parent", repo.path())
-		repo_clone.updateConfig()
+		repo_clone.saveConfiguration()
 
 	def main(self, ui, repo, *args, **opts):
 		if len(args) == 0: args = ["info"]

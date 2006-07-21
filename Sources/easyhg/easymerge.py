@@ -2,10 +2,10 @@
 # Encoding: iso-8859-1
 # vim: tw=80 ts=4 sw=4 et fenc=latin-1
 # -----------------------------------------------------------------------------
-# Project   : Mercurial - SVN-like merging tool
+# Project   : Mercurial - Easy tools
+# License   : GNU Public License         <http://www.gnu.org/licenses/gpl.html>
 # -----------------------------------------------------------------------------
 # Author    : Sebastien Pierre                           <sebastien@xprima.com>
-# License   : GNU Public License         <http://www.gnu.org/licenses/gpl.html>
 # -----------------------------------------------------------------------------
 # Creation  : 05-May-2006
 # Last mod  : 20-Jul-2006

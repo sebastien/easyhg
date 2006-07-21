@@ -3,9 +3,9 @@
 # vim: tw=80 ts=4 sw=4 noet fenc=latin-1
 # -----------------------------------------------------------------------------
 # Project   : Mercurial - Easycommit
+# License   : GNU Public License         <http://www.gnu.org/licenses/gpl.html>
 # -----------------------------------------------------------------------------
 # Author    : Sébastien Pierre                           <sebastien@xprima.com>
-# License   : GNU Public License         <http://www.gnu.org/licenses/gpl.html>
 # -----------------------------------------------------------------------------
 # Creation  : 10-Jul-2006
 # Last mod  : 20-Jul-2006
