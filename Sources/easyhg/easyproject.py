@@ -94,8 +94,8 @@ class ProjectRepository(Repository):
 		if not self._developers:
 			authors = {}
 			for changes in self.changes():
-				if changes[0] in self.owners(): continue
-				authors[changes[0]] = True
+				if changes.user in self.owners(): continue
+				authors[changes.user] = True
 			self._developers = authors.keys()
 		return self._developers
 
@@ -112,7 +112,8 @@ class ProjectRepository(Repository):
 			text += "name:        %s (%s)\n" % (self.name(), self.type())
 		if self.description():
 			text += "description: %s\n" % (self.description())
-		text += "state:       %s\n" % (", ".join(self.qualifiers()))
+		qualifiers = ", ".join(self.qualifiers())
+		if qualifiers: text += "state:       %s\n" % (qualifiers)
 		text += "current:     %s\n" % (self.path())
 		owners		 = self.owners()
 		developers	 = self.developers()
@@ -128,6 +129,7 @@ class ProjectRepository(Repository):
 			text += "developer:   " + developers[0] + "\n"
 		else:
 			text += "developers:  " + str(len(developers)) + "\n"
+		if text and  text[-1] == "\n": text = text[:-1]
 		return text
 
 # ------------------------------------------------------------------------------
@@ -153,7 +155,7 @@ class CentralRepository(ProjectRepository):
 	def addChild( self, repository ):
 		"""Adds the given Repository instance as a child of this repository.
 		This will update this repository configuration."""
-		assert isinstance(repository, DevelopmentRepository)
+		assert isinstance(repository, ProjectRepository)
 		if self.isSSH() or repository.isSSH():
 			project_url = repository.config.get("project", "url")
 			if not project_url:
@@ -192,12 +194,12 @@ class CentralRepository(ProjectRepository):
 		project relatively to the children repositories."""
 		res  = ProjectRepository.qualifiers(self)
 		qualifiers = {}
-		last_change = tuple(self.changes(1))
-		cauthor, ctime, cdate, desc, cfiles = last_change[0]
+		last_change = self.changes(1)
 		for child_repo_path in self.children():
+			print child_repo_path
 			child_repo = Repository_load(child_repo_path)
 			other_change = child_repo.change(1)
-			if other_change[1] > ctime:
+			if other_change.isNewer(last_change):
 				qualifiers["incoming change"] = True
 			# TODO: Add branch detection
 			# TODO: Add local changes detection
@@ -245,16 +247,15 @@ class DevelopmentRepository(ProjectRepository):
 		res = ProjectRepository.qualifiers(self)
 		qualifiers         = {}
 		# FIXME: This does not work
-		last_change        = tuple(self.changes(1))[0]
-		parent_last_change = tuple(self.parent().changes(1))[0]
-		cauthor, ctime, cdate, desc, cfiles = last_change
+		last_change        = self.changes(1)
+		parent_last_change = self.parent().changes(1)
 		if last_change == parent_last_change:
 			qualifiers["up to date"] = True
 			return qualifiers
-		elif last_change[1] < parent_last_change[1]:
+		elif parent_last_change.isNewer(last_change):
 			qualifiers["out of date"] = True
-		elif last_change[1] > parent_last_change[1]:
-			qualifiers["outgoing change"] = True
+		elif last_change.isNewer(parent_last_change):
+			qualifiers["outgoing changes"] = True
 		else:
 			qualifiers["up to date"] = True
 		res.extend(qualifiers.keys())
@@ -377,10 +378,8 @@ class Commands:
 					try:
 						parent_repo.addChild(repo)
 					except Repository.ConfigurationException, e:
-						ui.write("ERROR: " + str(e) + "\n")
-						ui.write("Set your project URL (in Mercurial syntax).\n")
-						ui.write("Ex: hg project set url=ssh://myip/myrepo\n")
-						return
+						ui.write("Your project has no project.url property\n")
+						ui.write("It will not be reachable by its parent.\n")
 					# TODO: The parent directory should be notified of children
 					# And save both configurations
 					repo.config.save()

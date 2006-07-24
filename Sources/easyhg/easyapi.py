@@ -171,7 +171,6 @@ class Repository:
 		"""Locates a directory which may be in the given path, or in any
 		ancestor of this path."""
 		path = os.path.abspath(path)
-		print path
 		old_path = None
 		while old_path != path:
 			hg_path  = os.path.join(path, ".hg")
@@ -209,10 +208,10 @@ class Repository:
 			if path.endswith(".hg"): path = os.path.dirname(path)
 			self._repo = mercurial.hg.repository(self._ui, path)
 		if self.isSSH():
-			api = MercurialSSH(self._repo)
+			api = MercurialSSH(self)
 			api.bind(self)
 		elif self.isLocal():
-			api = MercurialLocal(self._repo)
+			api = MercurialLocal(self)
 			api.bind(self)
 		else:
 			raise RepositoryNotSupported(self._repo.__class__.__name__)
@@ -232,13 +231,16 @@ class Repository:
 	# _________________________________________________________________________
 
 	def hgrepo( self ):
+		"""Returns the Mercurial repository object."""
 		return self._repo
 
 	def configpath( self ):
+		"""Returns the path to the repository configuration file."""
 		path = self.path()
 		return path + "/.hg/hgrc"
 
 	def path(self):
+		"""Returns the path to the repository, without the trailing .hg"""
 		path = self._repo.path
 		if path.endswith("/"):    path = path[:-1]
 		if path.endswith(".hg"):  path = path[:-3]
@@ -253,15 +255,6 @@ class Repository:
 
 	# UTILITIES
 	# _________________________________________________________________________
-
-	def _changesetInfo( self, ref ):
-		"""Returns informations on the given change set."""
-		changeset  = self._repo.changelog.read(ref)
-		cid, cauthor, ctime, cfiles, cdesc = changeset
-		cauthor = cauthor.strip()
-		cdate   = time.strftime('%d-%b-%Y', time.gmtime(ctime[0]))
-		cdesc   = cdesc.replace("'", "''").strip()
-		return cauthor, ctime, cdate, cdesc, cfiles
 
 	def _property( self, name, value = None, add=False ):
 		"""Gets a property set in this project configuration"""
@@ -309,6 +302,15 @@ class ChangeSet:
 		else: date = self.datetime - zmod
 		return date.timetuple()
 
+	def isNewer( self, changeset ):
+		return self.abstime() > changeset.abstime()
+
+	def __eq__( self, changeset ):
+		if isinstance( changeset, ChangeSet ):
+			return self.id == changeset.id
+		else:
+			return changeset == self
+
 	def __str__( self ):
 		return """\
 changeset:   %s:%s
@@ -319,6 +321,12 @@ description:
 %s
 """ % (self.num, self.id, self.user, time.strftime("%a %b %d %H:%M:%S %Y",self.time), self.zone, " ".join(self.files),
 self.description)
+
+# ------------------------------------------------------------------------------
+#
+# TAG
+#
+# ------------------------------------------------------------------------------
 
 class Tag:
 
@@ -459,9 +467,8 @@ class MercurialLocal(MercurialAPI):
 
 	def _startShell( self, shell="sh" ):
 		self._shin, self._shout, self._sherr = os.popen3(shell)
-		self._doCommand("cd " + self._repo.path)
+		self._doCommand("cd " + self._repo.path())
 		current = self._doCommand("pwd")[0]
-		#assert current.endswith(self._repo.path), "%s != %s" % (current, self._repo.path)
 
 	def _closeShell( self ):
 		self._doCommand("exit")
@@ -477,7 +484,7 @@ class MercurialLocal(MercurialAPI):
 		result = []
 		while True:
 			line = self._shout.readline()
-			if line.strip() == self.END_TOKEN: break
+			if line.strip().endswith(self.END_TOKEN): break
 			result.append(line[:-1])
 		return result
 
@@ -492,7 +499,7 @@ class MercurialLocal(MercurialAPI):
 		elif n != None:
 			return self._changes[:n]
 		else:
-			return self.changes
+			return self._changes
 
 	def count( self ):
 		return len(self._changes)
@@ -503,12 +510,13 @@ class MercurialLocal(MercurialAPI):
 		return self._tags
 
 	def readConfiguration( self ):
-		return "\n".join(self._doCommand("cat hgrc"))
+		res = self._doCommand("cat .hg/hgrc")
+		return "\n".join(res)
 
 	def writeConfiguration( self, text ):
 		cmd  = "echo '%s'" % (base64.b64encode(text))
 		cmd += "| python -c 'import sys, base64;print base64.b64decode(sys.stdin.read())'"
-		cmd += "> hgrc" 
+		cmd += "> .hg/hgrc" 
 		self._doCommand(cmd)
 
 # ------------------------------------------------------------------------------
@@ -528,20 +536,12 @@ class MercurialSSH(MercurialLocal):
 	
 	def _sshParameters( self ):
 		# This returns the proper SSH arguments to for the repository location
-		args = self._repo.user and ("%s@%s" % (self._repo.user, self._repo.host)) or self._repo.host
-		args = self._repo.port and ("%s -p %s") % (args, self._repo.port) or args
+		hgrepo = self._repo.hgrepo()
+		args = hgrepo.user and ("%s@%s" % (hgrepo.user, hgrepo.host)) or hgrepo.host
+		args = hgrepo.port and ("%s -p %s") % (args, hgrepo.port) or args
 		return args
 
 	def _startShell( self ):
 		MercurialLocal._startShell(self, "ssh %s sh" % (self._sshParameters()))
-
-	# SSH INTERACTION
-	# _________________________________________________________________________
-
-	def _sshParameters( self ):
-		# This returns the proper SSH arguments to for the repository location
-		args = self._repo.user and ("%s@%s" % (self._repo.user, self._repo.host)) or self._repo.host
-		args = self._repo.port and ("%s -p %s") % (args, self._repo.port) or args
-		return args
 
 # EOF
