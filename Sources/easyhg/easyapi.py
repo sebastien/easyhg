@@ -8,10 +8,10 @@
 # Author    : Sébastien Pierre                           <sebastien@xprima.com>
 # -----------------------------------------------------------------------------
 # Creation  : 21-Jul-2006
-# Last mod  : 21-Jul-2006
+# Last mod  : 24-Jul-2006
 # -----------------------------------------------------------------------------
 
-import os, string, time, re, tempfile
+import os, string, time, datetime, re, tempfile, base64
 import mercurial.ui, mercurial.hg, mercurial.localrepo, mercurial.sshrepo
 
 __doc__ = """\
@@ -24,16 +24,9 @@ and that it would be too radical to start patching it.
 """
 # ------------------------------------------------------------------------------
 #
-# UTILITY FUNCTIONS
+# CONFIGURATION FUNCTIONS
 #
 # ------------------------------------------------------------------------------
-
-def expand_path( path ):
-	"""Expands env variables and ~ symbol into the given path, and makes it
-	absolute."""
-	path = os.path.expanduser(path)
-	path = string.Template(path).substitute(os.environ)
-	return os.path.abspath(path)
 
 class Configuration:
 	"""This is a wrapper around a Mercurial repository configuration file that
@@ -145,94 +138,17 @@ class Configuration:
 		return "\n".join(res)
 
 	def read( self ):
-		if self._repo.isSSH():
-			hgrepo  = self._repo.hgrepo()
-			sshcmd  = self._repo._ui.config("ui", "ssh", "ssh")
-			sshcmd += " " + self._repo.isSSH()
-			# Touches and reads the hgrc configuration
-			os.popen("%s touch '%s'" % (sshcmd, self._repo.configpath()))
-			r = os.popen("%s cat '%s'" % (sshcmd, self._repo.configpath())).read()
-			return r
-		elif self._repo.isLocal():
-			if not os.path.exists(self._repo.configpath()): return ""
-			f = file(self._repo.configpath(), 'r')
-			r = f.read()
-			f.close()
-			return r
-		else:
-			raise self.RepositoryNotSupported(repr(self._repo.hgrepo()))
+		return self._repo.readConfiguration()
 
-	def save( self, path=None ):
-		if self._repo.isSSH():
-			sshcmd  = self._repo._ui.config("ui", "ssh", "ssh")
-			sshcmd += " " + self._repo.isSSH()
-			# Backs up the existing configuration
-			os.system("%s cp '%s' '%s.old'" % (sshcmd, self._repo.configpath(), self._repo.configpath()))
-			fd, path = tempfile.mkstemp(prefix="hg-easy")
-			os.write(fd, self.asString())
-			# Creates a new one
-			os.system("cat '%s' | %s cat - \">\" '%s'" % (path, sshcmd, self._repo.configpath()))
-			os.close(fd) ; os.unlink(path)
-		elif self._repo.isLocal():
-			# Backs up the existing configuration
-			f = file(self._repo.configpath() + ".old", 'w')
-			f.write(self.read())
-			f.close()
-			# Writes the new configuration file
-			f = file(self._repo.configpath(), 'w')
-			f.write(self.asString())
-			f.close()
-		else:
-			raise self.RepositoryNotSupported(repr(self._repo.hgrepo()))
+	def save( self ):
+		return self._repo.writeConfiguration(self.asString())
 
-def update_configuration( path, values ):
-	"""Updates the Mercurial repository configuration (.hg/hgrc) to be filled
-	with the given set of values. If the sections for the given values do not
-	exist, they will be added, if they were already present, they will be
-	replaced."""
-	# The given configuration file may not exist
-	if not os.path.isfile(path): text = ""
-	else: f = open(path, 'r') ; text = f.read() ; f.close()
-	result          = []
-	current_section = None
-	sections        = {}
-	# For every line of the Mercurial RC file
-	for line in text.split("\n"):
-		# If we are in a section, we log it
-		if line.strip().startswith("["):
-			current_section = line.strip()[1:-1].strip().lower()
-			result.append(line)
-			sections[current_section] = True
-			# We take care of the paths.default-push
-			if current_section == "paths" and values.get("parent"):
-				result.append("default-push = %s" % (values["parent"]))
-		# We skip the [project] section
-		elif current_section == "project":
-			for key, value in values.items():
-				result.append("%s = %s" % (key, value))
-			current_section = "SKIP"
-		# We skip the [paths] default-push
-		elif current_section == "paths" and values.get("parent"):
-			if line.strip().lower().startswith("default-push"): pass
-			else: result.append(line)
-		elif current_section == "SKIP":
-			pass
-		else:
-			result.append(line)
-	# If there was no project section, we create it
-	if not sections.get("project"):
-		result.append("[project]")
-		for key, value in values.items():
-			result.append("%s = %s" % (key, value))
-	# We add a paths sections with default-push if necessary
-	if not sections.get("paths") and values.get("parent"):
-		result.append("[paths]")
-		result.append("default-push = %s" % (values["parent"]))
-
-	text = "\n".join(result)
-	f = open(path, 'w') ; f.write(text) ; f.close()
-	# Returns the result as text
-	return text
+def expand_path( path ):
+	"""Expands env variables and ~ symbol into the given path, and makes it
+	absolute."""
+	path = os.path.expanduser(path)
+	path = string.Template(path).substitute(os.environ)
+	return os.path.abspath(path)
 
 # ------------------------------------------------------------------------------
 #
@@ -292,23 +208,26 @@ class Repository:
 		else:
 			if path.endswith(".hg"): path = os.path.dirname(path)
 			self._repo = mercurial.hg.repository(self._ui, path)
+		if self.isSSH():
+			api = MercurialSSH(self._repo)
+			api.bind(self)
+		elif self.isLocal():
+			api = MercurialLocal(self._repo)
+			api.bind(self)
+		else:
+			raise RepositoryNotSupported(self._repo.__class__.__name__)
 		# And the configuration
 		try:
 			self.config   = Configuration(self)
 		except Configuration.NotFound:
 			self.config   = Configuration()
-		# Now we bind protocol-specific method
-		if self.isSSH():
-			self.changes = self._ssh_changes
 
 	def isLocal( self ):
 		return isinstance(self._repo, mercurial.localrepo.localrepository)
 
 	def isSSH( self ):
-		if not isinstance(self._repo, mercurial.sshrepo.sshrepository):
-			return False
-		return self._ssh_location()
-		
+		return isinstance(self._repo, mercurial.sshrepo.sshrepository)
+
 	# ACCESSORS
 	# _________________________________________________________________________
 
@@ -331,29 +250,6 @@ class Repository:
 			return self.hgrepo().url
 		else:
 			return self.path()
-
-	def count( self ):
-		"""Returns the number of changes in this repository."""
-		return self._repo.changelog.count()
-
-	def changes( self, n=None ):
-		"""Yields the n (all by default) latest changes in this
-		repository. Each change is returned as (author, date, description, files)"""
-		changes_count = self._repo.changelog.count()
-		if n == None: n = changes_count
-		for i in range(min(n,changes_count)):
-			# We get the changeset node
-			changeset_ref = self._repo.changelog.node(changes_count - i - 1)
-			yield self._changesetInfo(changeset_ref)
-
-	def tags( self ):
-		"""Returns tag name, rev and date for each tag within this repository."""
-		tags = []
-		for name, ref in self._repo.tagslist():
-			cauthor, ctime, cdate, desc, cfiles = self._changesetInfo(ref)
-			tags.append((name, self._repo.changelog.rev(ref), cdate))
-		tags.reverse()
-		return tags
 
 	# UTILITIES
 	# _________________________________________________________________________
@@ -386,44 +282,266 @@ class Repository:
 		"""Sets a property in this project configuration"""
 		return map(string.strip, str(self._property(name)).split())
 
-	# SSH
+# ------------------------------------------------------------------------------
+#
+# CHANGESET
+#
+# ------------------------------------------------------------------------------
+
+class ChangeSet:
+	"""This class represents a changeset."""
+
+	def __init__( self ):
+		self.num      = -1
+		self.id       = None
+		self.time     = None
+		self.datetime = None
+		self.zone     = None
+		self.user     = None
+		self.files    = []
+		self.description = ""
+
+	def abstime( self ):
+		# And apply the timezone information
+		zone = self.zone
+		zmod = datetime.timedelta(hours=int(zone[1:3]), minutes=int(zone[3:]))
+		if zone[0] == "+": date = self.datetime + zmod
+		else: date = self.datetime - zmod
+		return date.timetuple()
+
+	def __str__( self ):
+		return """\
+changeset:   %s:%s
+user:        %s
+date:        %s %s
+files:       %s
+description:
+%s
+""" % (self.num, self.id, self.user, time.strftime("%a %b %d %H:%M:%S %Y",self.time), self.zone, " ".join(self.files),
+self.description)
+
+class Tag:
+
+	def __init__( self, name ):
+		self.name = name
+		self.id   = None
+		self.num  = None
+	
+	def __str__( self ):
+		return "%-31s%5d:%s" % (self.name, self.num, self.id)
+
+# ------------------------------------------------------------------------------
+#
+# MERCURIAL API
+#
+# ------------------------------------------------------------------------------
+
+class MercurialAPI:
+	"""The Mercurial API defines an abstract interface that defines various
+	methods that allow to access information on a Mercurial repository. It is
+	porvided as a convenient Object-Oriented wrapper around the Mercurial
+	commands.
+	
+	The API works well either locally or through an SSH connection."""
+
+	def __init__( self, repo ):
+		self._repo = repo
+
+	def bind( self, repo ):
+		assert isinstance(repo, Repository)
+		repo.count   = self.count
+		repo.changes = self.changes
+		repo.tags    = self.tags
+		repo.writeConfiguration = self.writeConfiguration
+		repo.readConfiguration = self.readConfiguration
+
+		self._start()
+
+	def _start( self ):
+		"""A private function that is called once the API was bound."""
+		pass
+
+	def count( self ):
+		"""Returns the number of changes in this repository."""
+		raise Exception("Not implemented")
+
+	def changes( self, n=None ):
+		"""Yields the n (all by default) latest changes in this
+		repository. Each change is returned as (author, date, description, files)"""
+		raise Exception("Not implemented")
+
+	def tags( self ):
+		"""Returns tag name, rev and date for each tag within this repository."""
+		raise Exception("Not implemented")
+	
+	def readConfiguration( self ):
+		"""Reads the .hg/hgrc configuration file, and returns it as a string."""
+		raise Exception("Not implemented")
+
+	def writeConfiguration( self, text ):
+		"""Writes the given .hg/hgrc configuration file."""
+		raise Exception("Not implemented")
+
+	def _parseChangelog( self, changelog ):
+		"""Parses Mercurial 'hg log -v' text output, and returns an array of
+		ChangeSet instances from that."""
+		changeset = None
+		changes   = []
+		for line in changelog:
+			if line.startswith("changeset:"):
+				if changeset: changes.append(changeset)
+				changeset = ChangeSet()
+				line, c_num, c_id     = line.split(":",2)
+				changeset.num = int(c_num)
+				changeset.id  = c_id
+			elif line.startswith("user:"):
+				assert changeset
+				changeset.user = line.split(":", 1)[1].strip()
+			elif line.startswith("date"):
+				assert changeset
+				date = line.split(":", 1)[1].strip()
+				zone = date[-5:]
+				date = date[:-6]
+				# We interpret the date
+				changeset.time = date = time.strptime(date, "%a %b %d %H:%M:%S %Y")
+				changeset.datetime = date = apply(datetime.datetime, date[:7])
+				changeset.date = date.timetuple()
+				changeset.zone = zone
+			elif line.startswith("files:"):
+				changeset.files = line.split(":", 1)[1].strip().split()
+			elif line.startswith("description:"):
+				pass
+			elif changeset:
+				if changeset and changeset.description[-2:] != "\n\n":
+					changeset.description += (line + "\n")
+		if changes[-1] != changes:
+			if changeset: changes.append(changeset)
+		for c in  changes:
+			if c.description[-1] == "\n": c.description = c.description[:-1]
+		return changes
+
+	def _parseTags( self, tagslist ):
+		result = []
+		for line in tagslist:
+			colon = line.rfind(":")
+			space = line.rfind(" ", 0, colon)
+			tag   = Tag(line[:space].strip())
+			tag.num = int(line[space+1:colon])
+			tag.id  = line[colon+1:]
+			result.append(tag)
+		return result
+
+# ------------------------------------------------------------------------------
+#
+# MERCURIAL LOCAL API
+#
+# ------------------------------------------------------------------------------
+
+class MercurialLocal(MercurialAPI):
+	"""This is an implementation for interacting with Mercurial through the
+	local filesystem."""
+
+	END_TOKEN = "@@MERCURIAL_SHELL_END@@"
+
+	def __init__( self, repo ):
+		MercurialAPI.__init__(self, repo)
+		self._shin   = None
+		self._shout  = None
+		self._sherr  = None
+		self._changes = None
+		self._tags    = None
+	
+	def _start( self ):
+		self._startShell()
+
+	# SSH INTERACTION
 	# _________________________________________________________________________
 
-	def _ssh_location( self ):
+	def _startShell( self, shell="sh" ):
+		self._shin, self._shout, self._sherr = os.popen3(shell)
+		self._doCommand("cd " + self._repo.path)
+		current = self._doCommand("pwd")[0]
+		#assert current.endswith(self._repo.path), "%s != %s" % (current, self._repo.path)
+
+	def _closeShell( self ):
+		self._doCommand("exit")
+		self._shout.close()
+		self._shin.close()
+		self._sherr.close()
+
+	def _doCommand( self, cmd, *args ):
+		cmd = "%s %s" % (cmd, " ".join(map(str, args)))
+		self._shin.write(cmd + "\n")
+		self._shin.write("echo %s\n" % (self.END_TOKEN))
+		self._shin.flush()
+		result = []
+		while True:
+			line = self._shout.readline()
+			if line.strip() == self.END_TOKEN: break
+			result.append(line[:-1])
+		return result
+
+	# API IMPLEMENTATION
+	# _________________________________________________________________________
+
+	def changes( self, n=None ):
+		if not self._changes:
+			self._changes = self._parseChangelog( self._doCommand("hg log -v"))
+		if n == 1:
+			return self._changes[0]
+		elif n != None:
+			return self._changes[:n]
+		else:
+			return self.changes
+
+	def count( self ):
+		return len(self._changes)
+
+	def tags( self, n=None ):
+		if not self._tags:
+			self._tags = self._parseTags( self._doCommand("hg tags"))
+		return self._tags
+
+	def readConfiguration( self ):
+		return "\n".join(self._doCommand("cat hgrc"))
+
+	def writeConfiguration( self, text ):
+		cmd  = "echo '%s'" % (base64.b64encode(text))
+		cmd += "| python -c 'import sys, base64;print base64.b64decode(sys.stdin.read())'"
+		cmd += "> hgrc" 
+		self._doCommand(cmd)
+
+# ------------------------------------------------------------------------------
+#
+# MERCURIAL SSH API
+#
+# ------------------------------------------------------------------------------
+
+class MercurialSSH(MercurialLocal):
+	"""This class implements methods for interacting with a Mercurial repository
+	through the SSH protocol."""
+
+	END_TOKEN = "@@MERCURIAL_SSH_END@@"
+
+	def __init__( self, repo ):
+		MercurialLocal.__init__(self, repo)
+	
+	def _sshParameters( self ):
 		# This returns the proper SSH arguments to for the repository location
 		args = self._repo.user and ("%s@%s" % (self._repo.user, self._repo.host)) or self._repo.host
 		args = self._repo.port and ("%s -p %s") % (args, self._repo.port) or args
 		return args
 
-	def _ssh( self, cmd ):
-		"""Runs the given command through SSH and returns the result"""
-		assert self.isSSH()
-		sshcmd  = self._repo._ui.config("ui", "ssh", "ssh")
-		sshcmd += " " + self._repo.isSSH()
-		return os.popen(sshcmd + " " + cmd).read()
+	def _startShell( self ):
+		MercurialLocal._startShell(self, "ssh %s sh" % (self._sshParameters()))
 
-	def _sshhg( self, cmd ):
-		"""Runs the given command through SSH and returns the result"""
-		assert self.isSSH()
-		sshcmd     = self.config.get("ui", "ssh") or "ssh"
-		remotecmd  = self.config.get("ui", "remotecmd") or "hg"
-		sshcmd    += " " + self.isSSH()
-		return os.popen(sshcmd + " " + remotecmd + " " + cmd).read()
+	# SSH INTERACTION
+	# _________________________________________________________________________
 
-	def _ssh_changes( self, n=None ):
-		"""Yields the n (all by default) latest changes in this
-		repository. Each change is returned as (author, date, description, files)"""
-		changes = self._sshhg("log -v")
-		changes = changes.split("changeset:")
-		for change in changes:
-			if not change.strip(): continue
-			changeset = change.split("\n")
-			revnum, chash = changeset[0].split(":")
-			cauthor       = changeset[1].split(":", 1)[1].strip()
-			cdate         = changeset[2].split(":", 1)[1].strip()
-			ctime         = cdate
-			cfiles        = changeset[3].split(":", 1)[1].split()
-			cdesc         = "\n".join(changeset[5:-1])
-			yield cauthor, ctime, cdate, cdesc, cfiles
+	def _sshParameters( self ):
+		# This returns the proper SSH arguments to for the repository location
+		args = self._repo.user and ("%s@%s" % (self._repo.user, self._repo.host)) or self._repo.host
+		args = self._repo.port and ("%s -p %s") % (args, self._repo.port) or args
+		return args
 
 # EOF
