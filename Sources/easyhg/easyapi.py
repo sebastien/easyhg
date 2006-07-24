@@ -322,6 +322,23 @@ description:
 """ % (self.num, self.id, self.user, time.strftime("%a %b %d %H:%M:%S %Y",self.time), self.zone, " ".join(self.files),
 self.description)
 
+class Modification:
+
+	UNTRACKED = "?"
+	ADDED     = "A"
+	REMOVED   = "R"
+	MODIFIED  = "M"
+	NOTFOUND  = "!"
+
+	def __init__( self, state, path ):
+		assert state in (self.UNTRACKED, self.ADDED, self.REMOVED,
+		self.MODIFIED, self.NOTFOUND)
+		self.state = state
+		self.path  = path
+	
+	def __str__( self ):
+		return "%s %s" % (self.state, self.path)
+
 # ------------------------------------------------------------------------------
 #
 # TAG
@@ -360,9 +377,9 @@ class MercurialAPI:
 		repo.count   = self.count
 		repo.changes = self.changes
 		repo.tags    = self.tags
+		repo.modifications = self.modifications
 		repo.writeConfiguration = self.writeConfiguration
 		repo.readConfiguration = self.readConfiguration
-
 		self._start()
 
 	def _start( self ):
@@ -376,6 +393,9 @@ class MercurialAPI:
 	def changes( self, n=None ):
 		"""Yields the n (all by default) latest changes in this
 		repository. Each change is returned as (author, date, description, files)"""
+		raise Exception("Not implemented")
+	
+	def modifications( self ):
 		raise Exception("Not implemented")
 
 	def tags( self ):
@@ -439,6 +459,14 @@ class MercurialAPI:
 			result.append(tag)
 		return result
 
+	def _parseStatus( self, status ):
+		result = []
+		for line in status:
+			state = line[0]
+			path  = line[2:]
+			result.append(Modification(state, path))
+		return result
+
 # ------------------------------------------------------------------------------
 #
 # MERCURIAL LOCAL API
@@ -457,6 +485,7 @@ class MercurialLocal(MercurialAPI):
 		self._shout  = None
 		self._sherr  = None
 		self._changes = None
+		self._modifications = None
 		self._tags    = None
 	
 	def _start( self ):
@@ -500,6 +529,11 @@ class MercurialLocal(MercurialAPI):
 			return self._changes[:n]
 		else:
 			return self._changes
+
+	def modifications( self ):
+		if not self._modifications:
+			self._modifications = self._parseStatus( self._doCommand("hg status"))
+		return self._modifications
 
 	def count( self ):
 		return len(self._changes)

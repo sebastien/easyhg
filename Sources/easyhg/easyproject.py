@@ -231,15 +231,15 @@ class DevelopmentRepository(ProjectRepository):
 		if not self._parent:
 			self._parent = Repository_load(self._property("project.parent"))
 		return self._parent
-
-	def isSynchronized( self ):
-		"""Tells wether this repository is synchronized with the parent
-		repository."""
-		return not self._repo.findincoming(self._parent._repo)
  
 	def isModified( self ):
 		"""Tells wether this repository has outgoing changesets."""
-		return self._repo.findoutgoing(self._parent._repo)
+		mods = self.modifications()
+		for m in mods:
+			if m.state == m.ADDED: return True
+			if m.state == m.REMOVED: return True
+			if m.state == m.MODIFIED: return True
+		return False
 
 	def qualifiers( self ):
 		"""Returns a list of qualifiers that describe the state of the central
@@ -266,7 +266,6 @@ class DevelopmentRepository(ProjectRepository):
 		# Qualifiers
 		meta  = [self.type()]
 		meta.extend(self.qualifiers())
-		if not self.isSynchronized(): meta.append("out of sync")
 		if self.isModified(): meta.append("modified")
 		# Summary
 		lines = list(ProjectRepository.summary(self).split("\n"))
