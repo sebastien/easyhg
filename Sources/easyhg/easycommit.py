@@ -94,7 +94,7 @@ class ConsoleUI:
 		self.ui.strings.CHANGE  = "[V]iew [C]ommit [S]ave [Q]uit"
 
 	def main( self, commit = None ):
-		self.ui.parse(CONSOLE_STYLE, CONSOLE_UI)
+		self.ui.create(CONSOLE_STYLE, CONSOLE_UI)
 		self.ui.DEFAULT_SUMMARY     = self.ui.widgets.edit_summary.get_edit_text()
 		self.ui.DEFAULT_DESCRIPTION = self.ui.widgets.edit_desc.get_edit_text()
 		self.ui.data.commit = commit

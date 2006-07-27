@@ -196,7 +196,6 @@ class CentralRepository(ProjectRepository):
 		qualifiers = {}
 		last_change = self.changes(1)
 		for child_repo_path in self.children():
-			print child_repo_path
 			child_repo = Repository_load(child_repo_path)
 			other_change = child_repo.change(1)
 			if other_change.isNewer(last_change):

@@ -257,7 +257,7 @@ class ConsoleUI(urwide.Handler):
 
     def main( self ):
         if self.ui.data.conflicts.all():
-            self.ui.parse(CONSOLE_STYLE, CONSOLE_UI)
+            self.ui.create(CONSOLE_STYLE, CONSOLE_UI)
             self.updateConflicts()
             self.ui.main()
         else:
