@@ -14,6 +14,9 @@
 import os, string, time, datetime, re, tempfile, base64
 import mercurial.ui, mercurial.hg, mercurial.localrepo, mercurial.sshrepo
 
+# TODO: Completely remove dependency on Mercurial
+# TODO: Create Repository Factory
+
 __doc__ = """\
 This modules wraps parts of Mercurial API with an OO layer that makes
 manipulation easier, and will lower the possibilities of breakage whenever the
@@ -22,6 +25,7 @@ Mercurial API changes.
 The reason for this API is that the current Mercurial API can be tedious to use,
 and that it would be too radical to start patching it.
 """
+
 # ------------------------------------------------------------------------------
 #
 # CONFIGURATION FUNCTIONS
@@ -208,10 +212,10 @@ class Repository:
 			if path.endswith(".hg"): path = os.path.dirname(path)
 			self._repo = mercurial.hg.repository(self._ui, path)
 		if self.isSSH():
-			api = MercurialSSH(self)
+			self.api = api = MercurialSSH(self)
 			api.bind(self)
 		elif self.isLocal():
-			api = MercurialLocal(self)
+			self.api = api = MercurialLocal(self)
 			api.bind(self)
 		else:
 			raise RepositoryNotSupported(self._repo.__class__.__name__)
@@ -442,7 +446,7 @@ class MercurialAPI:
 			elif changeset:
 				if changeset and changeset.description[-2:] != "\n\n":
 					changeset.description += (line + "\n")
-		if changes[-1] != changes:
+		if changes and changes[-1] != changeset:
 			if changeset: changes.append(changeset)
 		for c in  changes:
 			if c.description[-1] == "\n": c.description = c.description[:-1]
@@ -487,7 +491,8 @@ class MercurialLocal(MercurialAPI):
 		self._changes = None
 		self._modifications = None
 		self._tags    = None
-	
+		self._hg      = "hg"
+
 	def _start( self ):
 		self._startShell()
 
@@ -498,6 +503,8 @@ class MercurialLocal(MercurialAPI):
 		self._shin, self._shout, self._sherr = os.popen3(shell)
 		self._doCommand("cd " + self._repo.path())
 		current = self._doCommand("pwd")[0]
+		# TODO: Check for hg
+		# TODO: Check for python
 
 	def _closeShell( self ):
 		self._doCommand("exit")
@@ -516,13 +523,16 @@ class MercurialLocal(MercurialAPI):
 			if line.strip().endswith(self.END_TOKEN): break
 			result.append(line[:-1])
 		return result
+	
+	def _doHG( self, cmd, *args ):
+		return self._doCommand( self._hg + " " + cmd, *args )
 
 	# API IMPLEMENTATION
 	# _________________________________________________________________________
 
 	def changes( self, n=None ):
 		if not self._changes:
-			self._changes = self._parseChangelog( self._doCommand("hg log -v"))
+			self._changes = self._parseChangelog( self._doHG("log -v"))
 		if n == 1:
 			return self._changes[0]
 		elif n != None:
@@ -532,7 +542,7 @@ class MercurialLocal(MercurialAPI):
 
 	def modifications( self ):
 		if not self._modifications:
-			self._modifications = self._parseStatus( self._doCommand("hg status"))
+			self._modifications = self._parseStatus( self._doHG(" status"))
 		return self._modifications
 
 	def count( self ):
@@ -540,7 +550,7 @@ class MercurialLocal(MercurialAPI):
 
 	def tags( self, n=None ):
 		if not self._tags:
-			self._tags = self._parseTags( self._doCommand("hg tags"))
+			self._tags = self._parseTags( self._doHG("tags"))
 		return self._tags
 
 	def readConfiguration( self ):

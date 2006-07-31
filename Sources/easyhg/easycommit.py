@@ -197,6 +197,7 @@ class ConsoleUIHandler(urwide.Handler):
 	def reviewFile( self, commitEvent ):
 		parent_rev = commitEvent.parentRevision()
 		fd, path   = tempfile.mkstemp(prefix="hg-easycommit")
+		if not parent_rev: parent_rev = ""
 		os.write(fd, parent_rev)
 		self.ui.tooltip("Reviewing differences for " + commitEvent.path)
 		self.ui.draw()
