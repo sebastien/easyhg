@@ -62,15 +62,17 @@ Text*         : WH, DM, BO
 CONSOLE_UI = """\
 Hdr MERCURIAL - Easycommit %s
 
-Edt  Name          [$USERNAME]                   #edit_user
-Edt  Summary       [One line commit summary]     #edit_summary ?SUMMARY &key=sumUp
-Edt  Tags          [WIP, Feature]                #edit_tags    ?TAGS    &key=tag
+Edt Name          [$USERNAME]                   #edit_user
+Edt Summary       [One line commit summary]     #edit_summary ?SUMMARY &key=sumUp
+Edt Tags          [WIP, Feature]                #edit_tags    ?TAGS    &key=tag
 Dvd ___
 
-Edt  [Commit description]                        #edit_desc    ?DESC &key=describe multiline=True
+Box
+  Edt [Commit description]                       #edit_desc    ?DESC &key=describe multiline=True
+End
 Dvd ___
 
-Ple                                               #changes 
+Ple                                              #changes 
 End
 Dvd ___
 
