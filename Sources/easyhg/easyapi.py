@@ -8,10 +8,10 @@
 # Author    : Sébastien Pierre                           <sebastien@xprima.com>
 # -----------------------------------------------------------------------------
 # Creation  : 21-Jul-2006
-# Last mod  : 24-Jul-2006
+# Last mod  : 28-Aug-2006
 # -----------------------------------------------------------------------------
 
-import os, string, time, datetime, re, tempfile, base64
+import os, string, time, datetime, re, base64
 import mercurial.ui, mercurial.hg, mercurial.localrepo, mercurial.sshrepo
 
 # TODO: Completely remove dependency on Mercurial
@@ -24,6 +24,19 @@ Mercurial API changes.
 
 The reason for this API is that the current Mercurial API can be tedious to use,
 and that it would be too radical to start patching it.
+
+The EasyAPI gives you the following advantages:
+
+ - All operations work with local and remote (SSH) repositories
+ - Repository information can be cached (pickled) and restored later
+ - Complex queries can be easily done on the repo information
+ - Configuration manipulation is made very easy
+ - There is a nice, well-documented, easy to use OO API
+
+EasyAPI can be very useful to anybody willing to implement extensions or
+front-ends to Mercurial, as it abstracts from the mercurial API. EasyAPI uses
+the Mercurial command-line interface to interact with mercurial, and interprets
+the command-line output into an object structure.
 """
 
 # ------------------------------------------------------------------------------
@@ -49,6 +62,8 @@ class Configuration:
 	RE_PROPERTY = re.compile("^\s*([\w_\.]+)\s*=(.*)$")
 
 	def __init__( self, repo=None ):
+		"""Creaes a new configuration, which may use the given repostitory (must
+		be an easyapi repository)."""
 		self._currentSection = None
 		self._lines          = []
 		self._sections       = [("",[])]
@@ -57,12 +72,18 @@ class Configuration:
 		self.parse(repo)
 
 	def section( self, name ):
+		"""Returns the contents of the section with the given name or None if
+		not found."""
 		for section, contents in self._sections:
 			if section == name:
 				return contents
 		return None
 
 	def update( self, sectionName, name, value, replace=True, create=True ):
+		"""Updates the configuration variable of the given @name with the given
+		@value, contained in the given @sectionName. If @replace is False (True
+		by default), then the value is not replaced if it exists. If @create is
+		True (by default), the section will be created if it does not exist."""
 		assert sectionName, name
 		section = self.section(sectionName)
 		if section:
@@ -80,6 +101,7 @@ class Configuration:
 			return None
 
 	def unset( self, sectionName, name ):
+		"""Unset the given variable in the given section."""
 		section = self.section(sectionName)
 		if section:
 			for property_value in section:
@@ -94,6 +116,7 @@ class Configuration:
 		return self._updated
 
 	def get( self, section, name ):
+		"""Gets the value of the @name variable in the given @section."""
 		section = self.section(section)
 		if not section: return None
 		for _property, value in section:
@@ -102,10 +125,14 @@ class Configuration:
 		return None
 
 	def mget( self, section, name ):
+		"""Get the values bound to the @name variable in the given @section. The
+		values are expected to be comma-separated."""
 		value = self.get(section, name)
 		return map(string.strip, value.split(","))
 
 	def parse( self, repo ):
+		"""Parses the given repository configuration and initializes this
+		configuration instance with the parsed values."""
 		if not repo: return
 		self._content        = []
 		current_section      = self._sections[0]
@@ -127,6 +154,7 @@ class Configuration:
 				current_section.append(["", line])
 
 	def asString( self ):
+		"""Returns a string representation of this configuration."""
 		res = []
 		for section, values in self._sections:
 			if not section and not values: continue
@@ -142,9 +170,12 @@ class Configuration:
 		return "\n".join(res)
 
 	def read( self ):
+		"""Reads the configuration from the repository (this implies that the
+		repository exists)."""
 		return self._repo.readConfiguration()
 
 	def save( self ):
+		"""Saves the configruation to the repository.""" 
 		return self._repo.writeConfiguration(self.asString())
 
 def expand_path( path ):
@@ -169,6 +200,7 @@ class Repository:
 	repository (tags, changes), in a format that can be easily used by UIs."""
 
 	class ConfigurationException(Exception): pass
+	class RepositoryNotSupported(Exception): pass
 
 	@staticmethod
 	def locate( path="." ):
@@ -218,7 +250,7 @@ class Repository:
 			self.api = api = MercurialLocal(self)
 			api.bind(self)
 		else:
-			raise RepositoryNotSupported(self._repo.__class__.__name__)
+			raise self.RepositoryNotSupported(self._repo.__class__.__name__)
 		# And the configuration
 		try:
 			self.config   = Configuration(self)
@@ -226,10 +258,30 @@ class Repository:
 			self.config   = Configuration()
 
 	def isLocal( self ):
+		"""Tells if this repository is a local repository"""
 		return isinstance(self._repo, mercurial.localrepo.localrepository)
 
 	def isSSH( self ):
+		"""Tells if this repository is a remote repository, accessed through SSH"""
 		return isinstance(self._repo, mercurial.sshrepo.sshrepository)
+
+	# PERSISTENCE
+	# _________________________________________________________________________
+
+	def store( self, path, filename=None ):
+		"""Stores the repository in the given path as the given filename (which
+		is the repository name plus .repo, by default"""
+		pass
+	
+	def restore( self, path ):
+		"""Restores the repository from the given location."""
+		pass
+
+	
+	def reresh( self ):
+		"""Refreshes the repository information by querying the encapsulated HG
+		repository."""
+		pass
 
 	# ACCESSORS
 	# _________________________________________________________________________
@@ -326,7 +378,14 @@ description:
 """ % (self.num, self.id, self.user, time.strftime("%a %b %d %H:%M:%S %Y",self.time), self.zone, " ".join(self.files),
 self.description)
 
+# ------------------------------------------------------------------------------
+#
+# MODIFICATION
+#
+# ------------------------------------------------------------------------------
+
 class Modification:
+	"""A modification is an event that occured within a changeset."""
 
 	UNTRACKED = "?"
 	ADDED     = "A"
@@ -350,6 +409,7 @@ class Modification:
 # ------------------------------------------------------------------------------
 
 class Tag:
+	"""A tag allows to name a specific revision."""
 
 	def __init__( self, name ):
 		self.name = name
@@ -548,9 +608,8 @@ class MercurialLocal(MercurialAPI):
 	def count( self ):
 		return len(self._changes)
 
-	def tags( self, n=None ):
-		if not self._tags:
-			self._tags = self._parseTags( self._doHG("tags"))
+	def tags( self ):
+		if not self._tags: self._tags = self._parseTags( self._doHG("tags"))
 		return self._tags
 
 	def readConfiguration( self ):
@@ -585,7 +644,7 @@ class MercurialSSH(MercurialLocal):
 		args = hgrepo.port and ("%s -p %s") % (args, hgrepo.port) or args
 		return args
 
-	def _startShell( self ):
-		MercurialLocal._startShell(self, "ssh %s sh" % (self._sshParameters()))
+	def _startShell( self, shell="sh" ):
+		MercurialLocal._startShell(self, "ssh %s %s" % (self._sshParameters(), shell))
 
 # EOF

@@ -111,13 +111,13 @@ class ConsoleUI:
 		summ = self.ui.widgets.edit_summary.get_edit_text()
 		tags = self.ui.widgets.edit_tags.get_edit_text()
 		desc = self.ui.widgets.edit_desc.get_edit_text() 
-		desc = desc.replace("\n\n", "\n")
 		if tags: tags = "\n[TAGS] " + tags
 		msg = "%s\n\n%s%s" % (
 			summ,
 			desc,
 			tags,
 		)
+		while msg.find("\n\n") != -1: msg = msg.replace("\n\n", "\n")
 		return msg
 
 	def commitUser( self ):
