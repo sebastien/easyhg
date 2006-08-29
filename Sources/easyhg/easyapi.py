@@ -309,6 +309,12 @@ class Repository:
 		else:
 			return self.path()
 
+	def name( self ):
+		"""Returns the project name, which is the basename of the HG repository
+		path."""
+		# FIXME: Use the project extension
+		return os.path.basename(self.path())
+
 	# UTILITIES
 	# _________________________________________________________________________
 
@@ -338,16 +344,30 @@ class Repository:
 # ------------------------------------------------------------------------------
 
 class ChangeSet:
-	"""This class represents a changeset."""
+	"""This class represents a changeset. A changeset has the following
+	attributes:
+	
+	  -  @num
+	  -  @id
+	  -  @time
+	  -  @datetime
+	  -  @zone
+	  -  @user
+	  -  @files
+	  -  @description
+
+	"""
 
 	def __init__( self ):
-		self.num      = -1
-		self.id       = None
-		self.time     = None
-		self.datetime = None
-		self.zone     = None
-		self.user     = None
-		self.files    = []
+		self.num         = -1
+		self.id          = None
+		self.tag         = None
+		self.time        = None
+		self.datetime    = None
+		self.zone        = None
+		self.user        = None
+		self.files       = []
+		self.reponame    = None
 		self.description = ""
 
 	def abstime( self ):
@@ -365,7 +385,7 @@ class ChangeSet:
 		if isinstance( changeset, ChangeSet ):
 			return self.id == changeset.id
 		else:
-			return changeset == self
+			return False
 
 	def __str__( self ):
 		return """\
@@ -477,18 +497,32 @@ class MercurialAPI:
 	def _parseChangelog( self, changelog ):
 		"""Parses Mercurial 'hg log -v' text output, and returns an array of
 		ChangeSet instances from that."""
+		repo_name = self._repo.name()
 		changeset = None
 		changes   = []
 		for line in changelog:
 			if line.startswith("changeset:"):
 				if changeset: changes.append(changeset)
 				changeset = ChangeSet()
+				changeset.reponame = repo_name
 				line, c_num, c_id     = line.split(":",2)
 				changeset.num = int(c_num)
 				changeset.id  = c_id
 			elif line.startswith("user:"):
 				assert changeset
-				changeset.user = line.split(":", 1)[1].strip()
+				user = line.split(":", 1)[1].strip()
+				try:
+					user = user.decode("utf-8")
+				except:
+					try:
+						user = user.decode("latin-1")
+					except:
+						pass
+				# TODO: Add global encoding support
+				changeset.user = user.encode("latin-1")
+			elif line.startswith("tag:"):
+				assert changeset
+				changeset.tag = line.split(":", 1)[1].strip()
 			elif line.startswith("date"):
 				assert changeset
 				date = line.split(":", 1)[1].strip()
