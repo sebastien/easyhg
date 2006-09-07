@@ -8,10 +8,10 @@
 # Author    : Sébastien Pierre                           <sebastien@xprima.com>
 # -----------------------------------------------------------------------------
 # Creation  : 21-Jul-2006
-# Last mod  : 28-Aug-2006
+# Last mod  : 07-Sep-2006
 # -----------------------------------------------------------------------------
 
-import os, string, time, datetime, re, base64
+import os, string, time, datetime, re, base64, pickle, types
 import mercurial.ui, mercurial.hg, mercurial.localrepo, mercurial.sshrepo
 
 # TODO: Completely remove dependency on Mercurial
@@ -219,6 +219,11 @@ class Repository:
 		"""Creates a new Repository wrapper for a repository at the given path,
 		or for the given repository instance. If a Mercurial UI is given, it
 		will be used, otherwise it will be created."""
+		self._path    = path
+		self.api      = None
+		self._init(path,repo,ui)
+
+	def _init( self, path=None, repo=None, ui=None ):
 		# We extract the HG repository if necessary
 		if repo and isinstance(repo, Repository):
 			repo = repo.hgrepo()
@@ -243,14 +248,14 @@ class Repository:
 		else:
 			if path.endswith(".hg"): path = os.path.dirname(path)
 			self._repo = mercurial.hg.repository(self._ui, path)
-		if self.isSSH():
-			self.api = api = MercurialSSH(self)
-			api.bind(self)
-		elif self.isLocal():
-			self.api = api = MercurialLocal(self)
-			api.bind(self)
-		else:
-			raise self.RepositoryNotSupported(self._repo.__class__.__name__)
+		if not self.api:
+			if self.isSSH():
+				self.api = api = MercurialSSH(self)
+			elif self.isLocal():
+				self.api = api = MercurialLocal(self)
+			else:
+				raise self.RepositoryNotSupported(self._repo.__class__.__name__)
+		self.api.bind(self)
 		# And the configuration
 		try:
 			self.config   = Configuration(self)
@@ -268,20 +273,34 @@ class Repository:
 	# PERSISTENCE
 	# _________________________________________________________________________
 
-	def store( self, path, filename=None ):
+	def store( self, path ):
 		"""Stores the repository in the given path as the given filename (which
 		is the repository name plus .repo, by default"""
-		pass
+		f = file(path, "w")
+		pickle.dump(self, f)
+		f.close()
 	
-	def restore( self, path ):
+	@staticmethod
+	def restore( path ):
 		"""Restores the repository from the given location."""
-		pass
+		f   = file(path, 'r')
+		res = pickle.load(f)
+		f.close()
+		return res
 
-	
-	def reresh( self ):
-		"""Refreshes the repository information by querying the encapsulated HG
-		repository."""
-		pass
+	def __getstate__( self ):
+		odict = self.__dict__.copy() # copy the dict since we change it
+		del odict['_repo'] 
+		del odict['_ui'] 
+		for name in odict.keys():
+			if type(odict[name]) == types.MethodType:
+				del odict[name]
+		return odict
+
+	def __setstate__( self, data ):
+		self.__dict__.update(data)
+		self.api._repo = self
+		self._init(path=self._path)
 
 	# ACCESSORS
 	# _________________________________________________________________________
@@ -369,6 +388,7 @@ class ChangeSet:
 		self.files       = []
 		self.reponame    = None
 		self.description = ""
+		self.summary     = ""
 
 	def abstime( self ):
 		# And apply the timezone information
@@ -460,6 +480,7 @@ class MercurialAPI:
 		assert isinstance(repo, Repository)
 		repo.count   = self.count
 		repo.changes = self.changes
+		repo.tip     = self.tip
 		repo.tags    = self.tags
 		repo.modifications = self.modifications
 		repo.writeConfiguration = self.writeConfiguration
@@ -478,7 +499,11 @@ class MercurialAPI:
 		"""Yields the n (all by default) latest changes in this
 		repository. Each change is returned as (author, date, description, files)"""
 		raise Exception("Not implemented")
-	
+
+	def tip( self):
+		"""Returns the changeset number for the tip, as an integer"""
+		raise Exception("Not implemented")
+
 	def modifications( self ):
 		raise Exception("Not implemented")
 
@@ -523,7 +548,7 @@ class MercurialAPI:
 			elif line.startswith("tag:"):
 				assert changeset
 				changeset.tag = line.split(":", 1)[1].strip()
-			elif line.startswith("date"):
+			elif line.startswith("date:"):
 				assert changeset
 				date = line.split(":", 1)[1].strip()
 				zone = date[-5:]
@@ -539,11 +564,14 @@ class MercurialAPI:
 				pass
 			elif changeset:
 				if changeset and changeset.description[-2:] != "\n\n":
-					changeset.description += (line + "\n")
+					if changeset.summary == "":
+						changeset.summary = line
+					else:
+						changeset.description += (line + "\n")
 		if changes and changes[-1] != changeset:
 			if changeset: changes.append(changeset)
 		for c in  changes:
-			if c.description[-1] == "\n": c.description = c.description[:-1]
+			if c.description and c.description[-1] == "\n": c.description = c.description[:-1]
 		return changes
 
 	def _parseTags( self, tagslist ):
@@ -586,9 +614,17 @@ class MercurialLocal(MercurialAPI):
 		self._modifications = None
 		self._tags    = None
 		self._hg      = "hg"
+		self._lastTip = None
 
 	def _start( self ):
 		self._startShell()
+
+	def __getstate__( self ):
+		odict = self.__dict__.copy() # copy the dict since we change it
+		del odict['_shin'] 
+		del odict['_shout'] 
+		del odict['_sherr'] 
+		return odict
 
 	# SSH INTERACTION
 	# _________________________________________________________________________
@@ -625,14 +661,28 @@ class MercurialLocal(MercurialAPI):
 	# _________________________________________________________________________
 
 	def changes( self, n=None ):
+		command = " log -v"
+		tip     = self.tip()
 		if not self._changes:
-			self._changes = self._parseChangelog( self._doHG("log -v"))
+			self._changes = self._parseChangelog( self._doHG(command) )
+		elif self._lastTip != tip:
+			command += " -r tip:%d" % (self._lastTip + 1)
+			for change in self._parseChangelog( self._doHG(command) ):
+				self._changes.append(change)
+		self._lastTip = tip
 		if n == 1:
 			return self._changes[0]
 		elif n != None:
 			return self._changes[:n]
 		else:
 			return self._changes
+
+	def tip( self):
+		"""Returns the changeset number for the tip, as an integer"""
+		changeset = self._doHG("tip")[0]
+		change_id = changeset.split(":")[1].strip()
+		change_id = int(change_id)
+		return change_id
 
 	def modifications( self ):
 		if not self._modifications:
