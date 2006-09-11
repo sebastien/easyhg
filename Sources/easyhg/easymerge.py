@@ -17,7 +17,7 @@ try:
 except:
     urwide = None
 
-__version__ = "0.9.0"
+__version__ = "0.9.1"
 PROGRAM_NAME = os.path.splitext(os.path.basename(__file__))[0]
 
 MERGETOOL = 'gvimdiff'
@@ -35,12 +35,12 @@ USAGE = """\
 
 Commands :
 
-    list    [DIRECTORY]                     - list registered conflicts
-    resolve [CONFLICT] [keep|update|merge]  - resolves all/given conflict(s)
-    undo    [CONFLICT]                      - undo a resolution
-    clean   [DIRECTORY]                     - cleans up the conflict files
-    commit                                  - try to commit the changes (TODO)
-
+    list      [DIRECTORY]                     - list registered conflicts
+    resolve   [CONFLICT] [keep|update|merge]  - resolves all/given conflict(s)
+    unresolve [CONFLICT]                      - sets a conflict as unresolve
+    clean     [DIRECTORY]                     - cleans up the conflict files
+    commit                                    - try to commit the changes (TODO)
+ 
 Usage:
 
     Mercurial will automatically invoke this command when merging, so that it
@@ -50,8 +50,8 @@ Usage:
 
     You can then proceed to `resolve` the different conflicts that may have
     happened when merging. You can `list` the conflicts, and then `resolve` them
-    one by one. Whenever you made a mistake, and want to quickly undo a
-    resolution, use the `undo` command.
+    one by one. Whenever you made a mistake, and want to quickly unresolve a
+    conflict, use the `unresolve` command.
 
     Once you resolved all conflicts, you can `commit` to save your changes in
     your repository. Committing automatically cleans the current directory from
@@ -195,6 +195,9 @@ Text*         : WH, DM, BO
 
 #edit_summary : DM, DB, SO
 """
+DIALOG_STYLE = """
+header        : BL, Lg, BO
+"""
 
 CONSOLE_UI = """\
 Hdr MERCURIAL - Easymerge %s
@@ -203,8 +206,6 @@ Col
     Txt Path
     Txt Status
     Txt Choosen version
-
-
 End
 ___
 
@@ -220,6 +221,12 @@ Col                                 #conflicts
     Ple                             #other
     End
 End
+___
+
+GFl
+	Btn [Leave]                                   #btn_leave   &press=leave
+	Btn [Commit]                                  #btn_commit  &press=commit
+End
 """ % (__version__)
 
 
@@ -229,11 +236,37 @@ Hdr Conflict resolution
 Txt Did you resolve the conflict ?
 
 GFl
-    Btn [Yes]                       #yes
     Btn [No]                        #no
+    Btn [Yes]                       #yes
+End
+"""
+ASK_UNRESOLUTION = """
+Hdr Conflict resolution undo
+
+Txt Unresolving a conflict will change the state of your conflict file
+Txt to where it was. This is the equivalent of an `hg revert` on your
+Txt conflict file.
+
+Txt However, your changes will be saved in a `.merge` file, so you
+Txt can copy it over your current files to redo the resolution.
+
+Txt Would you like to proceed ?
+
+GFl
+    Btn [No]                        #no
+    Btn [Yes]                       #yes
 End
 """
 
+SHOW_MESSAGE = """
+Hdr %s
+
+Txt %s
+
+GFl
+    Btn [OK]                        #ok
+End
+"""
 class ConsoleUI(urwide.Handler):
     """Main user interface for easymerge."""
 
@@ -252,8 +285,8 @@ class ConsoleUI(urwide.Handler):
         self.ui = urwide.Console()
         self.ui.handler(self)
         self.ui.data.conflicts = conflicts
-        self.ui.strings.RESOLVED   = "RESOLVED   [U]ndo [R]eview [Q]uit"
-        self.ui.strings.UNRESOLVED = "UNRESOLVED [V]iew [M]erge [K]eep [U]pdate [Q]uit"
+        self.ui.strings.RESOLVED   = "RESOLVED   [U]nresolve [V]iew | [Q]uit"
+        self.ui.strings.UNRESOLVED = "UNRESOLVED [V]iew [R]esolve (use [P]arent or [O]ther) | [Q]uit"
 
     def main( self ):
         if self.ui.data.conflicts.all():
@@ -300,7 +333,6 @@ class ConsoleUI(urwide.Handler):
             #conflict.add_widget(self.ui.wrap(conflict, "@unresolved &key=resolve ?UNRESOLVED"))
         map(finish, "conflict state current parent other".split())
 
-
     def _updateConflictView( self, conflict ):
         if conflict.state == Conflict.UNRESOLVED:
             map(lambda w:w.set_state(False), conflict._ui_group)
@@ -331,34 +363,55 @@ class ConsoleUI(urwide.Handler):
         else:
             self.ui.setTooltip(widget, info(conflict.path()))
 
+    def _unresolveConflict( self, conflict, callback=False ):
+        # If the current resolved version was resolved form parent or other, we
+        # do not need to save a backup
+        if conflict._sig(conflict.path()) in (conflict._sig(conflict.parent()),
+        conflict._sig(conflict.other()), conflict._sig(conflict.current())):
+            callback = True
+        if callback:
+            backup = self.ops.unresolve(conflict.number)
+            conflict._ui_state.set_text((conflict.state.lower(), conflict.state))
+            self._updateConflictView(conflict)
+            if backup:
+                dialog = urwide.Dialog(self.ui, ui=SHOW_MESSAGE % (
+                    "Conflict unresolved",
+                    "Your changes were saved to `%s`" % (backup[0])
+                ), style=DIALOG_STYLE)
+                dialog.onPress(dialog.widgets.ok , lambda x:dialog.end())
+                self.ui.dialog(dialog)
+        else:
+            dialog = urwide.Dialog(self.ui, ui=ASK_UNRESOLUTION, style=DIALOG_STYLE)
+            dialog.onPress(dialog.widgets.yes, lambda x:cmp(dialog.end(), self._unresolveConflict(conflict, True)))
+            dialog.onPress(dialog.widgets.no , lambda x:dialog.end())
+            self.ui.dialog(dialog)
+        return True
+
     def onConflict( self, widget, key ):
         if key in ('left', 'right', 'up', 'down'): return False
-
         conflict = widget.conflict
         if conflict.state == Conflict.RESOLVED:
             # Undoes the conflict
             if   key == "u":
-                self.ops.undo(conflict.number)
-                conflict._ui_state.set_text((conflict.state.lower(), conflict.state))
-                self._updateConflictView(conflict)
+                self._unresolveConflict(conflict)
             # Reviews what as changed
-            elif key == "enter" or key == "r":
+            elif key == "enter" or key == "v":
                 widget.set_state (True)
                 self.ops.reviewConflict(conflict)
         else:
             # Reviews the conflict
             if   key == "v": 
-                self.ops.reviewConflict( widget.conflict.number)
+                self.ops.reviewConflict( widget.conflict )
             # Merges the parent and other manually
-            elif key == "m":
+            elif key == "r":
                 self.ops.resolveConflict( widget.conflict.number, "merge")
                 self._updateConflictView(conflict)
             # Takes the other version
-            elif key == "u":
+            elif key == "o":
                 self.ops.resolveConflict( widget.conflict.number, "update")
                 self._updateConflictView(conflict)
             # Keeps the parent version
-            elif key == "k":
+            elif key == "p":
                 self.ops.resolveConflict( widget.conflict.number, "keep")
                 self._updateConflictView(conflict)
             # Selects the current choice
@@ -382,7 +435,17 @@ class ConsoleUI(urwide.Handler):
                 #self.ui.end()
                 #res = os.popen("hg commit").read()
                 pass
+        else:
+            return False
 
+    def onLeave( self, widget ):
+        self.ui.tooltip("Leave")
+        self.ui.end("Don't forget to commit your changes !")
+
+
+    def onCommit( self, widget ):
+        os.system("hg commit")
+        self.ui.end()
 
     # Operations bindings
     # ------------------------------------------------------------------------
@@ -441,11 +504,29 @@ class Conflict:
     def other( self ):
         return self._path + ".other"
 
+    def nextMerge(self):
+        number = 0
+        while os.path.exists(self.path() + ".merge-" + str(number)):
+            number += 1
+        return self.path() + ".merge-" + str(number)
+
+    def merges(self):
+        number = 0
+        path   = self.path() + ".merge-" + str(number)
+        res    = []
+        while os.path.exists(path):
+            res.append(path)
+            path = self.path() + ".merge-" + str(number)
+        return res
+
     def _read( self, path ):
         f = file(path, 'r')
         r = f.read()
         f.close()
         return r
+
+    def _sig( self, path ):
+        return sha.new(self._read(path)).hexdigest()
 
     def resolutionType( self ):
         assert self.state == self.RESOLVED
@@ -638,19 +719,13 @@ class Operations:
         """Lists the conflicts in the given directory."""
         self.output(self.conflicts.asString(self.color))
 
-    def viewResolvedConflict( self, number ):
+    def reviewConflict( self, conflict ):
         """Reviews the given conflict, by comparing its current revision to the
         parent revision."""
-        if isinstance(number, Conflict):conflict  = number
-        else:  conflict  = self.conflicts.unresolved(number)
-        self.command("%s %s %s" % (MERGETOOL, conflict.path(), conflict.parent()))
-        
-    def reviewConflict( self, number ):
-        """Reviews the given conflict, by comparing its current revision to the
-        parent revision."""
-        if isinstance(number, Conflict):conflict  = number
-        else:  conflict  = self.conflicts.unresolved(number)
-        self.command("%s %s %s" % (MERGETOOL, conflict.parent(), conflict.other()))
+        if conflict.state == conflict.UNRESOLVED:
+            self.command("%s %s %s" % (MERGETOOL, conflict.parent(), conflict.other()))
+        else:
+            self.command("%s %s %s" % (MERGETOOL, conflict.path(), conflict.current()))
 
     def resolveConflict( self, number, action="merge"):
         """Resolves the given conflict by merging at first."""
@@ -700,27 +775,37 @@ class Operations:
             for number in numbers:
                self.resolveConflict(number) 
 
-    def undo( self, *numbers):
-        """Undo the given conflicts."""
+    def unresolve( self, *numbers):
+        """Unresolve the given conflicts."""
         conflicts = self.conflicts
         numbers   = map(int, numbers)
-        self.warning("NOTE: Undoing conflicts will revert your changes on the conflict file.")
+        self.warning("NOTE: Unresolving a conflict will revert your conflict"
+        + " file back to the original state.\n"
+        + "However, your current changes will be backed up.")
+        backups = []
         for number in numbers:
             conflict = conflicts.resolved(number)
-            if not conflicts:
-                self.error("No conflict with id: %s" % (number))
+            if not conflict:
+                self.error("No resolved conflict with id: %s" % (number))
                 continue
             if conflict.state == Conflict.UNRESOLVED:
-                self.error("Conflict is unresolved, so there is nothing to undo: %s" % (number))
+                self.error("Conflict is already unresolved: %s" % (number))
                 continue
-            res = self.ask("Do you want to undo conflict on %s (y/n) ? " % (conflict.path()))
+            res = self.ask("Do you want to unresolve conflict on %s (y/n) ? " % (conflict.path()))
             if res == "y":
-                self.log("Undoing conflict resolution, using %s as original data" % (conflict.current()))
+                self.log("Unresolving conflict, using %s as original data" % (conflict.current()))
+                if conflict._sig(conflict.path()) in (conflict._sig(conflict.parent()),
+                conflict._sig(conflict.other()), conflict._sig(conflict.current())):
+                    next_merge = conflict.nextMerge()
+                    self.log("Backing up current resolution conflict as: %s" % (next_merge))
+                    copy(conflict.path(), next_merge)
+                    backups.append(next_merge)
                 conflict.unresolve()
                 copy(conflict.current(), conflict.path())
             else:
                 self.log("Conflict left as it is.")
         conflicts.save()
+        return backups
 
     def clean( self ):
         """Cleans the given directory from the conflict backup files and from the
@@ -749,8 +834,7 @@ def run(args):
     """Runs the command with the given arguments."""
     if not args and urwide:
         ui = ConsoleUI(Conflicts())
-        ui.main()
-        return 0
+        return ui.main()
     root = os.path.abspath(os.getcwd())
     # Command: list [DIRECTORY]
     if len(args) in (1,2) and args[0] == "list":
@@ -776,12 +860,12 @@ def run(args):
             # We list the conflicts in the directory
             ops.resolveConflicts(*conflicts)
         return 0
-    # Command: undo CONFLICT...
-    elif len(args) >= 2 and args[0] == "undo":
+    # Command: unresolved CONFLICT...
+    elif len(args) >= 2 and args[0] == "unresolve":
         conflicts = args[1:]
         # We list the conflicts in the directory
         ops  = Operations(Conflicts(root))
-        ops.undo(*conflicts)
+        ops.unresolve(*conflicts)
         return 0
     # Command: clean [DIRECTORY]
     elif len(args) in (1,2) and args[0].startswith("clean"):

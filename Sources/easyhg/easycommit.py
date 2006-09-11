@@ -23,7 +23,7 @@ except:
 
 demandload(globals(), 'mercurial.ui mercurial.util mercurial.commands mercurial.localrepo')
 
-__version__ = "0.9.0"
+__version__ = "0.9.1"
 __doc__     = """\
 Easycommit is a tool that allows better, richer, more structured commits for
 Mercurial. It eases the life of the developers and enhances the quality and
@@ -102,7 +102,7 @@ class ConsoleUI:
 		self.ui.data.commit = commit
 		if commit:
 			self.defaultHandler.updateCommitFiles()
-		self.ui.main()
+		return self.ui.main()
 
 	def selectedChanges(self):
 		return self.defaultHandler.selectedChanges()
@@ -131,7 +131,7 @@ class ConsoleUIHandler(urwide.Handler):
 
 	def onCancel( self, button ):
 		self.ui.tooltip("Cancel")
-		sys.exit(-1)
+		self.ui.end("Nothing commited")
 
 	def onCommit( self, button ):
 		self.ui.tooltip("Commit")
@@ -363,7 +363,10 @@ def commit_wrapper(repo, files=None, text="", user=None, date=None,
 		# And we invoke the commit editor
 		app = ConsoleUI()
 		app.ui.strings.USERNAME = USERNAME
-		app.main(commit_object)
+		res = app.main(commit_object)
+		if not res:
+			print "Nothing was commited"
+			return
 		files = map(lambda c:c.path, app.selectedChanges())
 		# Now we execute the old commit method
 		if files:
