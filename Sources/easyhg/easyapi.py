@@ -8,7 +8,7 @@
 # Author    : Sébastien Pierre                           <sebastien@xprima.com>
 # -----------------------------------------------------------------------------
 # Creation  : 21-Jul-2006
-# Last mod  : 07-Sep-2006
+# Last mod  : 11-Sep-2006
 # -----------------------------------------------------------------------------
 
 import os, string, time, datetime, re, base64, pickle, types
@@ -219,8 +219,9 @@ class Repository:
 		"""Creates a new Repository wrapper for a repository at the given path,
 		or for the given repository instance. If a Mercurial UI is given, it
 		will be used, otherwise it will be created."""
-		self._path    = path
-		self.api      = None
+		self._path       = path
+		self.api         = None
+		self._loadedFrom = None
 		self._init(path,repo,ui)
 
 	def _init( self, path=None, repo=None, ui=None ):
@@ -273,9 +274,11 @@ class Repository:
 	# PERSISTENCE
 	# _________________________________________________________________________
 
-	def store( self, path ):
+	def store( self, path=None ):
 		"""Stores the repository in the given path as the given filename (which
 		is the repository name plus .repo, by default"""
+		if path == None: path = self._loadedFrom
+		assert path
 		f = file(path, "w")
 		pickle.dump(self, f)
 		f.close()
@@ -285,6 +288,7 @@ class Repository:
 		"""Restores the repository from the given location."""
 		f   = file(path, 'r')
 		res = pickle.load(f)
+		res._loadedFrom = path
 		f.close()
 		return res
 
@@ -619,6 +623,9 @@ class MercurialLocal(MercurialAPI):
 	def _start( self ):
 		self._startShell()
 
+	def _stop( self ):
+		self._stopShell()
+
 	def __getstate__( self ):
 		odict = self.__dict__.copy() # copy the dict since we change it
 		del odict['_shin'] 
@@ -636,13 +643,15 @@ class MercurialLocal(MercurialAPI):
 		# TODO: Check for hg
 		# TODO: Check for python
 
-	def _closeShell( self ):
-		self._doCommand("exit")
+	def _stopShell( self ):
 		self._shout.close()
 		self._shin.close()
 		self._sherr.close()
+		self._shout = self._shin = self._sherr = None
 
 	def _doCommand( self, cmd, *args ):
+		if self._shout == None: self._startShell()
+		assert self._shout
 		cmd = "%s %s" % (cmd, " ".join(map(str, args)))
 		self._shin.write(cmd + "\n")
 		self._shin.write("echo %s\n" % (self.END_TOKEN))
