@@ -131,7 +131,7 @@ class ConsoleUIHandler(urwide.Handler):
 
 	def onCancel( self, button ):
 		self.ui.tooltip("Cancel")
-		self.ui.end("Nothing commited")
+		self.ui.end("Commit canceled",status=False)
 
 	def onCommit( self, button ):
 		self.ui.tooltip("Commit")
