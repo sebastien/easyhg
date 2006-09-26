@@ -298,8 +298,8 @@ class ChangeEvent( Event ):
 		"""Returns the diffstat information"""
 		if self._cache_info: return self._cache_info
 		info = self.parent.commandInRepo("hg diff '%s' | diffstat" % (self.path))
-		if info[-1] == "\n": info = info[:-1]
-		self._cache_info = info
+		if info and info[-1] == "\n": info = info[:-1]
+		self._cache_info = info or "Diffstat not available"
 		return self._cache_info
 
 class AddEvent( Event ):
