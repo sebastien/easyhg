@@ -1,0 +1,10 @@
+== Easy Mercurial Extensions
+== To-do list
+
+EasyCommit
+==========
+
+	[ ] Detect if 'diffstat' is available
+	[ ] Use the 'DIFFTOOL' (or whatever other option there is) to view the
+	    differences. Otherwise default to '$EDITOR' and 'patch'.
+	[ ] Offer an option to 'name' a specific commit (basically, a release)

@@ -111,7 +111,7 @@ class ConsoleUI:
 		summ = self.ui.widgets.edit_summary.get_edit_text()
 		tags = self.ui.widgets.edit_tags.get_edit_text()
 		desc = self.ui.widgets.edit_desc.get_edit_text() 
-		if tags: tags = "\ntags: " + tags
+		if tags: tags = "\n%-12s %s" % ("tags:" , tags.lower())
 		msg = "%s\n\n%s%s" % (
 			summ,
 			desc,
