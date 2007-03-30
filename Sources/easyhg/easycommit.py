@@ -5,10 +5,10 @@
 # Project   : Mercurial - Easycommit
 # License   : GNU Public License         <http://www.gnu.org/licenses/gpl.html>
 # -----------------------------------------------------------------------------
-# Author    : Sébastien Pierre                           <sebastien@xprima.com>
+# Author    : Sébastien Pierre                           <sebastien@type-z.org>
 # -----------------------------------------------------------------------------
 # Creation  : 10-Jul-2006
-# Last mod  : 21-Jul-2006
+# Last mod  : 30-Mar-2007
 # -----------------------------------------------------------------------------
 
 import sys, os, re, time, stat, tempfile
@@ -23,7 +23,7 @@ except:
 
 demandload(globals(), 'mercurial.ui mercurial.util mercurial.commands mercurial.localrepo')
 
-__version__ = "0.9.1"
+__version__ = "0.9.3"
 __doc__     = """\
 Easycommit is a tool that allows better, richer, more structured commits for
 Mercurial. It eases the life of the developers and enhances the quality and
@@ -35,7 +35,7 @@ consistency of commits.
 # CONSOLE INTERFACE
 #
 # ------------------------------------------------------------------------------
-
+DEFAULT_TAGS  = "Fix Feature Update Release Merge Branch Major Minor Experimental".split()
 CONSOLE_STYLE = """\
 Frame         : WH, DB, SO
 header        : WH, DC, BO
@@ -64,7 +64,7 @@ Hdr MERCURIAL - Easycommit %s
 
 Edt Name          [$USERNAME]                   #edit_user
 Edt Summary       [One line commit summary]     #edit_summary ?SUMMARY &key=sumUp
-Edt Tags          [WIP, Feature]                #edit_tags    ?TAGS    &key=tag
+Edt Tags          [Update]                      #edit_tags    ?TAGS    &key=tag
 Dvd ___
 
 Box
@@ -92,7 +92,7 @@ class ConsoleUI:
 		self.ui.handler(self.defaultHandler)
 		self.ui.strings.DESC    = "Describe your changes in detail here"
 		self.ui.strings.SUMMARY = "Give a one-line summary of your changes"
-		self.ui.strings.TAGS    = "Tags allow you to explicitly state specific aspects of your commit."
+		self.ui.strings.TAGS    = "Enter tags [+] and [-] to cycle through available tags"
 		self.ui.strings.CHANGE  = "[V]iew [C]ommit [S]ave [Q]uit"
 
 	def main( self, commit = None ):
@@ -111,7 +111,7 @@ class ConsoleUI:
 		summ = self.ui.widgets.edit_summary.get_edit_text()
 		tags = self.ui.widgets.edit_tags.get_edit_text()
 		desc = self.ui.widgets.edit_desc.get_edit_text() 
-		if tags: tags = "\n[TAGS] " + tags
+		if tags: tags = "\ntags: " + tags
 		msg = "%s\n\n%s%s" % (
 			summ,
 			desc,
@@ -144,12 +144,58 @@ class ConsoleUIHandler(urwide.Handler):
 		widget._alreadyEdited = True
 		return False
 
+	def isTag( self, tagname ):
+		"""Tells wether the given @tagname (as text) is a tag from the
+		@DEFAULT_TAGS and returns the indice of the tag in the array. The tag
+		matches if on of the @DEFAULT_TAGS start with the given tagname."""
+		i = 0
+		for tag in DEFAULT_TAGS:
+			if tagname.lower() == tag.lower():
+				return i
+			i += 1
+		i = 0
+		for tag in DEFAULT_TAGS:
+			if tag.lower().startswith(tagname.lower()):
+				if i == 0: return len(DEFAULT_TAGS) - 1
+				else: return i- 1
+			i += 1
+		return -1
+		
 	def onTag( self, widget, key ):
-		if hasattr(widget, "_alreadyEdited"): return False
-		if key in ("left", "right", "up", "down", "tab", "shift tab"): return False
-		widget.set_edit_text("")
-		widget._alreadyEdited = True
-		return False
+		# This takes into account tag completion
+		if key in ( "+", "-" ):
+			if key == "+":
+				offset  = 1
+				default = -1
+			else:
+				offset  = -1
+				default = 0
+			o = widget.edit_pos
+			t = widget.get_edit_text()
+			current_tag = len(map(lambda x:x.strip(), t[:o].strip().split())) -1 
+			tags = map(lambda x:x.strip(), t.strip().split())
+			if tags:
+				i = self.isTag(tags[current_tag])
+				i = (i+ offset) % len(DEFAULT_TAGS)
+				tooltip = "Available tags: %s [%s] %s" % (
+					" ".join(DEFAULT_TAGS[:i]),
+					DEFAULT_TAGS[i].upper(),
+					" ".join(DEFAULT_TAGS[i+1:])
+				)
+				self.ui.tooltip(tooltip)
+				tags[current_tag] = (DEFAULT_TAGS[i])
+			else:
+				tags.append(DEFAULT_TAGS[default])
+			widget.set_edit_text(" ".join(tags))
+			widget._alreadyEdited = True
+			return True
+		if not hasattr(widget, "_alreadyEdited"):
+			if key in ("left", "right", "up", "down", "tab", "shift tab"): return False
+			widget.set_edit_text("")
+			widget._alreadyEdited = True
+			return False
+		else:
+			return False
 
 	def onDescribe( self, widget, key ):
 		if key in ("left", "right", "up", "down", "tab", "shift tab"): 
@@ -337,14 +383,17 @@ class RemoveEvent( Event ):
 USERNAME = None
 
 def commit_wrapper(repo, files=None, text="", user=None, date=None,
-    match=mercurial.util.always, force=False, lock=None, wlock=None,
-    force_editor=False):
+    	match=mercurial.util.always, force=False, lock=None, wlock=None,
+    	force_editor=False,cmdoptions=None):
 	"""Replacement for the localrepository commit that intercepts the list of
 	changes. This function takes care of firing the """
+	
 	assert isinstance(repo, mercurial.localrepo.localrepository),\
 	"Easycommit only works with local repositories (for now)"
+	
 	# The following is adapted from localrepo.py (commit function)
-	# ---------------------------------------------------------------------------
+	# References are mercurial.commands.commit and localrepo.commit
+	
 	added     = []
 	removed   = []
 	deleted   = []
@@ -352,9 +401,11 @@ def commit_wrapper(repo, files=None, text="", user=None, date=None,
 	if files:
 		raise Exception("Explicit files are not supported right now.")
 	else:
-		changed, added, removed, deleted, unknown = repo.changes(match=match)
-	# ---------------------------------------------------------------------------
-	# We create a commit object that sums up the information
+		print "POUET", repo.status(match=match)
+		changed, added, removed, deleted, unknown, ignored, clean = repo.status(match=match)
+
+	# We create a commit object that sums up the information	
+	
 	commit_object = Commit(repo)
 	for c in changed: commit_object.events.append(ChangeEvent(commit_object, c))
 	for c in added:   commit_object.events.append(AddEvent(commit_object, c))
@@ -370,8 +421,15 @@ def commit_wrapper(repo, files=None, text="", user=None, date=None,
 		files = map(lambda c:c.path, app.selectedChanges())
 		# Now we execute the old commit method
 		if files:
+			# This is the old commit prototype
+			# def commit(self, files=None, text="", user=None, date=None,
+			#			 match=util.always, force=False, lock=None,
+			#			 wlock=None,
+			#			 force_editor=False, p1=None, p2=None,
+			#			 extra={}):
 			repo._old_commit( files, app.commitMessage(), app.commitUser(),
 			date, match, force, lock, wlock, force_editor )
+			# This was necessary for 0.9.3
 			print
 			print "Easycommit: Commit successful !"
 			print
@@ -379,34 +437,38 @@ def commit_wrapper(repo, files=None, text="", user=None, date=None,
 	else:
 		print "No changes: nothing to commit"
 
-def command_defaults(cmd):
+def command_defaults(ui, cmd):
 	"""Returns the default option values for the given Mercurial command. This
 	was taken from the Tailor conversion script."""
 	if hasattr(mercurial.commands, 'findcmd'):
 		findcmd = mercurial.commands.findcmd
 	else:
 		findcmd = mercurial.commands.find
-	return dict([(f[1].replace('-', '_'), f[2]) for f in findcmd(cmd)[1][1]])
+	return dict([(f[1].replace('-', '_'), f[2]) for f in findcmd(ui, cmd)[1][1]])
 
-def command_main( ui, repo, *args, **opts ):
+def easy_commit( ui, repo, *args, **opts ):
+	"""This is the main function that is called by the 'hg' commands (actually
+	through the 'mercurial.commands.dispatch' function)."""
 	# Here we swap the default commit implementation with ours
 	repo_old_commit            = repo.__class__.commit
 	repo.__class__.commit      = commit_wrapper
 	repo.__class__._old_commit = repo_old_commit
 	global USERNAME ; USERNAME = ui.username()
+	new_opts = {}
+	for key, value in opts.items(): new_opts[key] = value
 	# Sets the default commit options
-	for key, value in COMMIT_DEFAULTS.items():
+	for key, value in command_defaults(ui, "commit").items():
 		if not opts.has_key(key): opts[key] = value
 	# Restores the commit implementation
-	mercurial.commands.commit(ui, repo, *args, **opts)
+	new_opts['cmdoptions'] = new_opts
+	# Invokes the 'normal' mercurial commit
+	mercurial.commands.commit(ui, repo, *args, **new_opts)
 	repo.__class__.commit  = repo_old_commit
 	del repo.__class__._old_commit
 
-# This stores the Mercurial commit defaults, that will be used by the
-# command_main
-COMMIT_DEFAULTS = command_defaults("commit")
-cmdtable = {
-	"commit": ( command_main, [], 'hg commit', "TODO" )
-}
+# This may change in the different Mercurial version, maybe we should find a
+# better way of doing this.d
+COMMIT_COMMAND =  mercurial.commands.table["^commit|ci"]
+cmdtable = { "commit": (easy_commit,  COMMIT_COMMAND[1],    COMMIT_COMMAND[2])}
 
 # EOF
