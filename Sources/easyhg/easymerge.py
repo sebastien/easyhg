@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # Encoding: iso-8859-1
-# vim: tw=80 ts=4 sw=4 et fenc=latin-1
+# vim: tw=80 ts=4 sw=4 et
 # -----------------------------------------------------------------------------
 # Project   : Mercurial - Easy tools
 # License   : GNU Public License         <http://www.gnu.org/licenses/gpl.html>

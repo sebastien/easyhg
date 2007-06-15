@@ -4,6 +4,8 @@
 EasyCommit
 ==========
 
+bug: when commit is empty
+
 	[ ] Detect if 'diffstat' is available
 	[ ] Use the 'DIFFTOOL' (or whatever other option there is) to view the
 	    differences. Otherwise default to '$EDITOR' and 'patch'.

@@ -30,12 +30,16 @@ Mercurial. It eases the life of the developers and enhances the quality and
 consistency of commits.
 """
 
+# Can be gview -db 
+REVIEWTOOL = 'gvimdiff'
+if os.environ.has_key("REVIEWTOOL"): REVIEWTOOL = os.environ.get("REVIEWTOOL")
+
 # ------------------------------------------------------------------------------
 #
 # CONSOLE INTERFACE
 #
 # ------------------------------------------------------------------------------
-DEFAULT_TAGS  = "Fix Feature Update Release Merge Branch Major Minor Experimental".split()
+DEFAULT_TAGS  = "Fix Feature Update Refactor Experiment Prototype Release Merge Branch Major Minor Experimental".split()
 CONSOLE_STYLE = """\
 Frame         : WH, DB, SO
 header        : WH, DC, BO
@@ -160,7 +164,7 @@ class ConsoleUIHandler(urwide.Handler):
 				else: return i- 1
 			i += 1
 		return -1
-		
+
 	def onTag( self, widget, key ):
 		# This takes into account tag completion
 		if key in ( "+", "-" ):
@@ -172,7 +176,7 @@ class ConsoleUIHandler(urwide.Handler):
 				default = 0
 			o = widget.edit_pos
 			t = widget.get_edit_text()
-			current_tag = len(map(lambda x:x.strip(), t[:o].strip().split())) -1 
+			current_tag = len(map(lambda x:x.strip(), t[:o].strip().split())) -1
 			tags = map(lambda x:x.strip(), t.strip().split())
 			if tags:
 				i = self.isTag(tags[current_tag])
@@ -198,7 +202,7 @@ class ConsoleUIHandler(urwide.Handler):
 			return False
 
 	def onDescribe( self, widget, key ):
-		if key in ("left", "right", "up", "down", "tab", "shift tab"): 
+		if key in ("left", "right", "up", "down", "tab", "shift tab"):
 			return False
 		if not hasattr(widget, "_alreadyEdited"):
 			widget.set_edit_text("")
@@ -208,7 +212,7 @@ class ConsoleUIHandler(urwide.Handler):
 	def onChangeInfo( self, widget ):
 		self.ui.tooltip(widget.commitEvent.info())
 		self.ui.info(self.ui.strings.CHANGE)
-	
+
 	def onChange( self, widget, key ):
 		if key == "v":
 			self.reviewFile(widget.commitEvent)
@@ -249,7 +253,7 @@ class ConsoleUIHandler(urwide.Handler):
 		os.write(fd, parent_rev)
 		self.ui.tooltip("Reviewing differences for " + commitEvent.path)
 		self.ui.draw()
-		os.popen("gview -df '%s' '%s'" % (commitEvent.abspath(), path)).read()
+		os.popen("%s '%s' '%s'" % (REVIEWTOOL, commitEvent.abspath(), path)).read()
 		os.close(fd)
 		os.unlink(path)
 
@@ -339,7 +343,7 @@ class ChangeEvent( Event ):
 
 	def parentRevision( self ):
 		return self.parent.hg("cat -r%s '%s'" % (self.parent.parent(), self.abspath()))
-		
+
 	def info( self ):
 		"""Returns the diffstat information"""
 		if self._cache_info: return self._cache_info
@@ -387,13 +391,13 @@ def commit_wrapper(repo, files=None, text="", user=None, date=None,
     	force_editor=False,cmdoptions=None):
 	"""Replacement for the localrepository commit that intercepts the list of
 	changes. This function takes care of firing the """
-	
+
 	assert isinstance(repo, mercurial.localrepo.localrepository),\
 	"Easycommit only works with local repositories (for now)"
-	
+
 	# The following is adapted from localrepo.py (commit function)
 	# References are mercurial.commands.commit and localrepo.commit
-	
+
 	added     = []
 	removed   = []
 	deleted   = []
@@ -405,7 +409,7 @@ def commit_wrapper(repo, files=None, text="", user=None, date=None,
 		changed, added, removed, deleted, unknown, ignored, clean = repo.status(match=match)
 
 	# We create a commit object that sums up the information	
-	
+
 	commit_object = Commit(repo)
 	for c in changed: commit_object.events.append(ChangeEvent(commit_object, c))
 	for c in added:   commit_object.events.append(AddEvent(commit_object, c))
