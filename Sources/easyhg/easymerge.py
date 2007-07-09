@@ -8,25 +8,23 @@
 # Author    : Sebastien Pierre                           <sebastien@xprima.com>
 # -----------------------------------------------------------------------------
 # Creation  : 05-May-2006
-# Last mod  : 20-Jul-2006
+# Last mod  : 09-Jul-2007
 # -----------------------------------------------------------------------------
 
 import os, sys, re, shutil, difflib, stat, sha
+import mergetool
 try:
     import urwide, urwid
 except:
     urwide = None
 
-__version__ = "0.9.1"
+__version__ = "0.9.3"
 PROGRAM_NAME = os.path.splitext(os.path.basename(__file__))[0]
-
-MERGETOOL = 'gvimdiff'
-if os.environ.has_key("MERGETOOL"): MERGETOOL = os.environ.get("MERGETOOL")
 
 USAGE = """\
 %s %s
 
-    hg-svnmerge is tool for Subversion-like merging in Mercurial. It gives more
+    %s is tool for Subversion-like merging in Mercurial. It gives more
     freedom to the resolution of conflicts, the user can individually pick the
     changes and resolve them with its preferred set of tools.
 
@@ -55,9 +53,9 @@ Usage:
 
     Once you resolved all conflicts, you can `commit` to save your changes in
     your repository. Committing automatically cleans the current directory from
-    files created by hg-svnmerge, but you can also `clean` the directory
+    files created by %s, but you can also `clean` the directory
     whenever you want (for instance, when you do not want to merge anymore).
-""" % (PROGRAM_NAME, __version__)
+""" % (PROGRAM_NAME, __version__, PROGRAM_NAME, PROGRAM_NAME)
 
 CLEAN_MATCH    = re.compile("^.+\.(current|parent|other)(\.\d+)?$")
 CONFLICTS_FILE = ".hgconflicts"
@@ -172,11 +170,12 @@ def diff_count( a, b ):
 CONSOLE_STYLE = """\
 Frame         : WH, DB, SO
 header        : WH, DC, BO
-footer        : LG, DB, SO
-info          : WH, Lg, BO
-tooltip       : Lg, DB, SO
+footer        : WH, DB, SO
+info          : BL, DC, SO
+tooltip       : Lg, DB, BO
 
-label         : WH, DB, BO
+label         : Lg, DB, SO
+title         : WH, DB, BO
 
 resolved      : DG, DB, SO
 unresolved    : LR, DB, SO
@@ -202,12 +201,24 @@ header        : BL, Lg, BO
 CONSOLE_UI = """\
 Hdr MERCURIAL - Easymerge %s
 
-Col                                 
-    Txt Path
-    Txt Status
-    Txt Choosen version
+Txt  Easymerge allows you to easily merge two branches.
+Txt  Merging is done using the merge tool specified by the MERGETOOL environment variable
+
+Txt  When merging a file (ex: 'src/file.py'), here are some important terms: args:@label
+Txt 
+Txt  MERGED, CURRENT -> the file 'src/file.py' as it is on the filesystem args:@label
+Txt  PARENT          -> the file 'src/file.py.parent', corresponding to the parent version args:@label
+Txt  OTHER           -> the file 'src/file.py.other', corresponding to the other/merged version args:@label
+
+---
+
+Col
+    Txt  Path   args:align='left'
+    Txt Status  args:align='left'
+    Txt Choosen version args:align='left'
+    Txt 
+    Txt 
 End
-___
 
 Col                                 #conflicts
     Ple                             #conflict
@@ -221,11 +232,12 @@ Col                                 #conflicts
     Ple                             #other
     End
 End
+
 ___
 
 GFl
-	Btn [Leave]                                   #btn_leave   &press=leave
-	Btn [Commit]                                  #btn_commit  &press=commit
+    Btn [Leave]                                   #btn_leave   &press=leave
+    Btn [Commit]                                  #btn_commit  &press=commit
 End
 """ % (__version__)
 
@@ -318,7 +330,7 @@ class ConsoleUI(urwide.Handler):
         # We register the conflicts
         for c in self.ui.data.conflicts.all():
             group = []
-            edit  = add(c, "conflict", urwid.Edit, c.path())
+            edit  = add(c, "conflict", urwid.Edit, " " + c.path())
             state = add(c, "state",    urwid.Text, (c.state.lower(), c.state))
             cur   = add(c, "current",  urwid.RadioButton, group, "merged", False)
             par   = add(c, "parent",   urwid.RadioButton, group, "parent", False)
@@ -457,7 +469,7 @@ class ConsoleUI(urwide.Handler):
         os.popen(command).read()
 
     def format( self, format, **kwargs ):
-        return format
+        return format(message, **kwargs)
 
     def log( self, *args ):
         self.ui.info(" ".join(map(str, args)))
@@ -700,7 +712,7 @@ class Operations:
         info(*args)
 
     def format( self, message, **kwargs ):
-        format(message, **kwargs)
+        return format(message, **kwargs)
 
     def warning( self, message ):
         warning(message)
@@ -723,9 +735,9 @@ class Operations:
         """Reviews the given conflict, by comparing its current revision to the
         parent revision."""
         if conflict.state == conflict.UNRESOLVED:
-            self.command("%s %s %s" % (MERGETOOL, conflict.parent(), conflict.other()))
+            mergetool.merge(conflict.parent(), conflict.other())
         else:
-            self.command("%s %s %s" % (MERGETOOL, conflict.path(), conflict.current()))
+            mergetool.merge(conflict.path(), conflict.current())
 
     def resolveConflict( self, number, action="merge"):
         """Resolves the given conflict by merging at first."""
@@ -742,15 +754,18 @@ class Operations:
         conflict_file = self.format(conflict.path(),color=RED)
         if   action == "merge":
             self.log("Resolving conflict", conflict_file ,"by",
-            self.format("manual merging",color=BLUE,  weight=BOLD))
-            self.command("%s %s %s" % (MERGETOOL, conflict.path(), conflict.other()))
+                self.format("manual merging",color=BLUE,  weight=BOLD)
+            )
+            mergetool.merge(conflict.path(), conflict.other())
         elif action == "keep":
             self.log("Resolving conflict", conflict_file ,"by",
-            self.format("keeping the parent version",color=BLUE,  weight=BOLD))
+                self.format("using the 'parent' file '%s'" % (conflict.parent()),color=BLUE,  weight=BOLD)
+            )
             copy(conflict.parent(), conflict.path())
         elif action == "update":
             self.log("Resolving conflict", conflict_file, "by",
-            self.format("using the .other file", color=BLUE, weight=BOLD))
+                self.format("using the 'other' file" % (conflict.other()), color=BLUE, weight=BOLD)
+            )
             copy(conflict.other(), conflict.path())
         else:
             raise Exception("Unknown resolution action: " + action)
