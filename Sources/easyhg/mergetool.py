@@ -8,10 +8,10 @@
 # Author    : Sebastien Pierre                           <sebastien@type-z.org>
 # -----------------------------------------------------------------------------
 # Creation  : 09-Jul-2007
-# Last mod  : 09-Jul-2007
+# Last mod  : 10-Jul-2007
 # -----------------------------------------------------------------------------
 
-import os
+import os, popen2
 MERGETOOL = None
 
 FM_APP    = "/Developer/Applications/Utilities/FileMerge.app/Contents/MacOS/FileMerge"
@@ -36,6 +36,19 @@ The supported merge applications are:
 
 """
 
+def popen(command):
+	# FIXME: popen3[1] does not give the same results as popen !!
+	out, sin = popen2.popen4(command)
+	sin.close()
+	res = out.read() ; out.close()
+	return res
+
+def which(program):
+	"""Tells if the given program is available in the path."""
+	res = popen("which %s" % (program))
+	res = not res.startswith("no ")
+	return res
+
 def detectMergeTool():
 	"""Detects the mergetool for this platform."""
 	global MERGETOOL
@@ -43,25 +56,31 @@ def detectMergeTool():
 	if os.environ.has_key("MERGETOOL"):
 		MERGETOOL = os.environ.get("MERGETOOL")
 		return
-	has_gvim	  = os.popen("gvimdiff --help").read()
-	has_tkdiff	= os.popen("tkdiff --help").read()
-	has_fm		= os.popen("which " + FM_APP).read()
+	has_gvim    = which("gvdimdiff")
+	has_tkdiff  = which("tkdiff")
+	has_fm      = which( FM_APP)
 	if  has_gvim:
 		MERGETOOL = GVIMDIFF
-	elif has_fm:
-		MERGETOOL = FILEMERGE
 	elif has_tkdiff:
 		MERGETOOL = TKDIFF
+	elif has_fm:
+		MERGETOOL = FILEMERGE
 	else:
 		raise Exception(
 			"No file merging utility. Please set the MERGETOOL variable\n"
 			+ HELP
 		)
 
+def review( a, b ):
+	"""Reviews A and B (without allowing modifications)"""
+	detectMergeTool()
+	command = MERGETOOL % (a,b)
+	return popen(command)
+
 def merge( a, b ):
 	"""Merges file A with file B."""
 	detectMergeTool()
 	command = MERGETOOL % (a,b)
-	return os.popen(command).read()
+	return popen(command)
 
 # EOF
