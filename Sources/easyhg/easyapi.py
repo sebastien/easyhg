@@ -8,10 +8,10 @@
 # Author    : Sébastien Pierre                           <sebastien@xprima.com>
 # -----------------------------------------------------------------------------
 # Creation  : 21-Jul-2006
-# Last mod  : 11-Sep-2006
+# Last mod  : 20-Jul-2007
 # -----------------------------------------------------------------------------
 
-import os, string, time, datetime, re, base64, pickle, types
+import os, string, time, datetime, re, base64, pickle, types, sha, popen2
 import mercurial.ui, mercurial.hg, mercurial.localrepo, mercurial.sshrepo
 
 # TODO: Completely remove dependency on Mercurial
@@ -197,7 +197,9 @@ class Repository:
 	repository.
 
 	This class was designed to easily give important information about a
-	repository (tags, changes), in a format that can be easily used by UIs."""
+	repository (tags, changes), in a format that can be easily used by UIs.
+	TODO: How to use
+	"""
 
 	class ConfigurationException(Exception): pass
 	class RepositoryNotSupported(Exception): pass
@@ -405,6 +407,10 @@ class ChangeSet:
 	def isNewer( self, changeset ):
 		return self.abstime() > changeset.abstime()
 
+	def getFileSignatures( self ):
+		"""Returns a list of couples (path, signature) corresponding to the
+		added/modified files version and their SHA-1 signature."""
+
 	def __eq__( self, changeset ):
 		if isinstance( changeset, ChangeSet ):
 			return self.id == changeset.id
@@ -484,6 +490,8 @@ class MercurialAPI:
 		assert isinstance(repo, Repository)
 		repo.count   = self.count
 		repo.changes = self.changes
+		repo.fileCat = self.fileCat
+		repo.fileSig = self.fileSig
 		repo.tip     = self.tip
 		repo.tags    = self.tags
 		repo.modifications = self.modifications
@@ -501,12 +509,25 @@ class MercurialAPI:
 
 	def changes( self, n=None ):
 		"""Yields the n (all by default) latest changes in this
-		repository. Each change is returned as (author, date, description, files)"""
+		repository. Each change is returned as a 'ChangeSet' instance."""
 		raise Exception("Not implemented")
 
 	def tip( self):
 		"""Returns the changeset number for the tip, as an integer"""
 		raise Exception("Not implemented")
+
+	def fileCat( self, path, revision="tip" ):
+		"""Returns the content of the given file for the given revision, or None
+		if the file does not exist for the given revision."""
+		raise Exception("Not implemented")
+
+	def fileSig( self, path, revision="tip" ):
+		"""Returns the SHA-1 signature of the given file content. This uses the
+		'fileCat' operation."""
+		content = self.fileCat(path, revision)
+		if content is None: return None
+		sig = sha.new(content).hexdigest()
+		return sig
 
 	def modifications( self ):
 		raise Exception("Not implemented")
@@ -613,7 +634,6 @@ class MercurialLocal(MercurialAPI):
 		MercurialAPI.__init__(self, repo)
 		self._shin   = None
 		self._shout  = None
-		self._sherr  = None
 		self._changes = None
 		self._modifications = None
 		self._tags    = None
@@ -630,14 +650,13 @@ class MercurialLocal(MercurialAPI):
 		odict = self.__dict__.copy() # copy the dict since we change it
 		del odict['_shin'] 
 		del odict['_shout'] 
-		del odict['_sherr'] 
 		return odict
 
 	# SSH INTERACTION
 	# _________________________________________________________________________
 
 	def _startShell( self, shell="sh" ):
-		self._shin, self._shout, self._sherr = os.popen3(shell)
+		self._shout, self._shin = popen2.popen4(shell)
 		self._doCommand("cd " + self._repo.path())
 		current = self._doCommand("pwd")[0]
 		# TODO: Check for hg
@@ -646,8 +665,7 @@ class MercurialLocal(MercurialAPI):
 	def _stopShell( self ):
 		self._shout.close()
 		self._shin.close()
-		self._sherr.close()
-		self._shout = self._shin = self._sherr = None
+		self._shout = self._shin = None
 
 	def _doCommand( self, cmd, *args ):
 		if self._shout == None: self._startShell()
@@ -662,7 +680,7 @@ class MercurialLocal(MercurialAPI):
 			if line.strip().endswith(self.END_TOKEN): break
 			result.append(line[:-1])
 		return result
-	
+
 	def _doHG( self, cmd, *args ):
 		return self._doCommand( self._hg + " " + cmd, *args )
 
@@ -685,6 +703,27 @@ class MercurialLocal(MercurialAPI):
 			return self._changes[:n]
 		else:
 			return self._changes
+
+	def signatures( self, changeset ):
+		"""Returns the signatures for the content of the files modified by the
+		given changeset"""
+
+	def fileCat( self, path, revision="tip" ):
+		# FIXME: Does not preserve the file exactly
+		content = self._doHG("cat", " -r%s" % (revision), "'%s'" % (path) )
+		if len(content) == 1 \
+		and content[0].startswith("%s: No such file in rev" % (path)):
+			return None
+		else:
+			return "\n".join(content)
+
+	def fileSig( self, path, revision="tip" ):
+		# FIXME: Does not preserve the file exactly
+		content = self._doCommand("%s cat -r%s '%s' | openssl dgst -sha1" % (self._hg, revision, path))
+		if len(content) != 1:
+			return None
+		else:
+			return content[0]
 
 	def tip( self):
 		"""Returns the changeset number for the tip, as an integer"""
