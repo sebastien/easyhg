@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 # Encoding: iso-8859-1
-# vim: tw=80 ts=4 sw=4 et
 # -----------------------------------------------------------------------------
 # Project   : Mercurial - Easy tools
 # License   : GNU Public License         <http://www.gnu.org/licenses/gpl.html>
@@ -204,12 +203,7 @@ Hdr MERCURIAL - Easymerge %s
 Txt  Easymerge allows you to easily merge two branches.
 Txt  Merging is done using the merge tool specified by the MERGETOOL environment variable
 
-Txt  When merging a file (ex: 'src/file.py'), here are some important terms: args:@label
-Txt 
-Txt  LOCAL/MERGED    -> the file 'src/file.py' as it is on the filesystem args:@label
-Txt  CURRENT         -> the file 'src/file.py.current', correspond to the the current version args:@label
-Txt  PARENT          -> the file 'src/file.py.parent', corresponding to the parent version args:@label
-Txt  OTHER           -> the file 'src/file.py.other', corresponding to the other (pulled/merged) version args:@label
+$REVINFO
 
 ---
 
@@ -280,6 +274,15 @@ GFl
     Btn [OK]                        #ok
 End
 """
+
+INFO_TEMPLATE = """\
+      [M]         Local    what you're working on
+    /     \\
+ [R%3d]    |      Current  R%s:%s on %s by (%s)
+   |    [R%3d]    Other    R%s:%s on %s by (%s)
+ [R%3d]    |      Parent   R%s:%s on %s by (%s)
+   .       .\
+"""
 class ConsoleUI(urwide.Handler):
 	"""Main user interface for easymerge."""
 
@@ -301,9 +304,23 @@ class ConsoleUI(urwide.Handler):
 		self.ui.strings.RESOLVED   = "RESOLVED   [V]iew | [U]nresolve | [Q]uit"
 		self.ui.strings.UNRESOLVED = "UNRESOLVED [V]iew | Resolve by [R]eplacing or [M]erging | [Q]uit"
 
+	def conflicts( self ):
+		"""Returns the conflicts associated with this UI."""
+		return self.ui.data.conflicts
+
+	def mergeInfo( self ):
+		"""Returns a user-friendly descirption of the merge"""
+		cur,par,oth = hg_get_merge_revisions()
+		return INFO_TEMPLATE % (
+			int(cur[0]), cur[0], cur[1], cur[3], cur[2],
+			int(oth[0]), oth[0], oth[1], oth[3], oth[2],
+			int(par[0]), par[0], par[1], par[3], par[2]
+		)
+
 	def main( self ):
 		if self.ui.data.conflicts.all():
-			self.ui.create(CONSOLE_STYLE, CONSOLE_UI)
+			console_ui = CONSOLE_UI.replace("$REVINFO", "\n".join(["Txt  " + l for l in self.mergeInfo().split("\n")]))
+			self.ui.create(CONSOLE_STYLE, console_ui)
 			self.updateConflicts()
 			self.ui.main()
 		else:
@@ -482,7 +499,7 @@ class ConsoleUI(urwide.Handler):
 
 # -----------------------------------------------------------------------------
 #
-# CONFLICTS CLASS
+# CONFLICT CLASS
 #
 # -----------------------------------------------------------------------------
 
@@ -491,18 +508,22 @@ class Conflict:
 
 	RESOLVED   = "RESOLVED"
 	UNRESOLVED = "UNRESOLVED"
-	SEPARATOR  = "--vs--"
-	PARENT	 = "parent"
-	OTHER	  = "other"
-	MERGED	 = "merged"
+	SEPARATOR  = " -- "
+	PARENT     = "parent"
+	OTHER      = "other"
+	MERGED     = "merged"
 
-	def __init__( self, number, path, state=None, description="" ):
+	def __init__( self, number, path, currentPath, parentPath, otherPath,
+	state=None, description="" ):
 		if not state: state = Conflict.UNRESOLVED
 		assert type(number) == int
 		self.number = number
 		self.state  = state
 		self._path  = path
-		self.description = description
+		self._currentPath = currentPath
+		self._parentPath  = parentPath
+		self._otherPath   = otherPath
+		self.description  = description
 
 	def getState( self ):
 		"""Returns the state for this conflict (Conflict.RESOLVED or
@@ -519,13 +540,13 @@ class Conflict:
 		return self._path
 
 	def current( self ):
-		return self._path + ".current"
+		return self._currentPath
 
 	def parent( self ):
-		return self._path + ".parent"
+		return self._parentPath
 
 	def other( self ):
-		return self._path + ".other"
+		return self._otherPath
 
 	def nextMerge(self):
 		number = 0
@@ -574,29 +595,33 @@ class Conflict:
 	def parse( line, number=-1 ):
 		"""Returns a new conflict from the given conflict string
 		representation."""
-		line     = line.strip()
-		colon    = line.find(":")
-		colon2   = line.rfind(":")
-		if not line or colon == -1: return
-		if colon2 == -1: line +=" "
-		number   = line[:colon].strip()
-		sep	  = line.find(Conflict.SEPARATOR)
-		original = line[colon+1:sep].strip()
+		line     = line.strip() + " "
+		if not line: return
+		number, l, c, p, o, d = line.split(" : ")
 		if number.startswith("R"):
 			status = Conflict.RESOLVED
 			number = number[1:]
 		else: status = Conflict.UNRESOLVED
 		description = ""
-		return Conflict(int(number), original, status, description)
+		return Conflict(int(number), l, c, p, o, d)
 
 	def asString( self ):
 		a = cutpath(os.path.abspath(os.getcwd()), self.path())
-		b = cutpath(os.path.abspath(os.getcwd()), self.other())
+		b = cutpath(os.path.abspath(os.getcwd()), self.current())
+		c = cutpath(os.path.abspath(os.getcwd()), self.parent())
+		d = cutpath(os.path.abspath(os.getcwd()), self.other())
 		p = self.state == self.RESOLVED and "R" or ""
-		return "%s%4s: %s %s %s:%s" % (p, self.number, a, self.SEPARATOR, b, self.description)
+		return "%s%4s : %s : %s : %s : %s : %s" % (p, self.number,
+		a,b,c,d,self.description)
 
 	def __str__( self ):
 		return self.asString()
+
+# -----------------------------------------------------------------------------
+#
+# CONFLICTS CLASS
+#
+# -----------------------------------------------------------------------------
 
 class Conflicts:
 	"""This is a utility class that represents the list of conflicts, and
@@ -660,11 +685,13 @@ class Conflicts:
 			if not res: return None
 			else: return res[0]
 
-	def add( self, path, other ):
+	def add( self, path, currentPath, parentPath, otherPath ):
 		"""Adds a new conflict between the given files, and returns the conflict
 		as a (STATE, ID, FILES) triple."""
 		path    = os.path.abspath(path)
-		other   = os.path.abspath(other)
+		parent  = os.path.abspath(parentPath)
+		other   = os.path.abspath(otherPath)
+		current = os.path.abspath(currentPath)
 		next    = 0
 		# We do not add a conflict twice
 		for c in self._conflicts:
@@ -674,9 +701,11 @@ class Conflicts:
 			else:
 				return c
 		# Eventually adds the conflict
-		next	 = len(self.unresolved())
-		conflict = Conflict(next, path)
-		assert other == conflict.other(), "Internal error"
+		next     = len(self.unresolved())
+		conflict = Conflict(next, path, current, parent, other)
+		assert other   == conflict.other(), "Internal error"
+		assert current == conflict.current(), "Internal error"
+		assert parent  == conflict.parent(), "Internal error"
 		self._conflicts.append(conflict)
 		return conflict
 
@@ -741,10 +770,10 @@ class Operations:
 	def command( self, command ):
 		os.system(command)
 
-	def addConflicts( self, path, other ):
+	def addConflicts( self, path, currentPath, parentPath, otherPath ):
 		"""Adds the given conflict to the list of conflicts (stored in a
 		'.hgconflicts' file), in the given root directory."""
-		c = self.conflicts.add(path, other)
+		c = self.conflicts.add(path, currentPath, parentPath, otherPath)
 		self.conflicts.save()
 		return c
 
@@ -891,6 +920,23 @@ class Operations:
 #
 # -----------------------------------------------------------------------------
 
+def hg_get_merge_revisions():
+	"""Returns a tuple (CURRENT, PARENT, OTHER) where each value is a couple
+	(REV, CHANGESET ID)."""
+	lines = os.popen("hg heads").read().split("\n")
+	res   = []
+	for line in lines:
+		if line.startswith("changeset:") or line.startswith("parent:"):
+			info = list(map(lambda x:x.strip(),line.split(":")[1:]))
+			detail = os.popen("hg log -r%s" % (info[0])).read()
+			for line in detail.split("\n"):
+				if line.startswith("user:"):
+					info.append(line[5:].strip())
+				elif line.startswith("date:"):
+					info.append(line[5:].strip())
+			res.append(info)
+	return res
+
 RE_NUMBER = re.compile("\d+")
 def run(args):
 	"""Runs the command with the given arguments."""
@@ -956,14 +1002,15 @@ def run(args):
 		info("Registering conflict")
 		# We prepare the destination paths
 		original, parent, other = map(os.path.abspath, args)
-		original_copy = original + ".current"
-		parent_copy   = original + ".parent"
-		other_copy	= original + ".other"
+		cur_rev, par_rev, oth_rev = hg_get_merge_revisions()
+		original_copy           = original + ".current-r" + cur_rev[0]
+		parent_copy             = original + ".parent-r"  + par_rev[0]
+		other_copy              = original + ".other-r"   + oth_rev[0]
 		# We print the conflict
 		ops  = Operations(Conflicts(root))
-		conflict = ops.addConflicts(original, other_copy)
+		conflict = ops.addConflicts(original, original_copy, parent_copy, other_copy)
 		print "Conflict %4d:" % (conflict.number)
-		print cutpath(root, original), "[" + str(int(diff_count(original, other))) + "%]"
+		print cutpath(root, original), "[" + str(int(diff_count(original, other))) + "% equivalent]"
 		print "  parent     ", cutpath(root, parent_copy)
 		print "  current    ", cutpath(root, original_copy)
 		print "  other      ", cutpath(root, other_copy)
@@ -987,4 +1034,4 @@ def run(args):
 if __name__ == "__main__":
 	sys.exit(run(sys.argv[1:]))
 
-# EOF
+# EOF - vim: tw=80 ts=4 sw=4 noet
