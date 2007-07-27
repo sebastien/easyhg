@@ -8,16 +8,13 @@
 # Author    : Sebastien Pierre                           <sebastien@type-z.org>
 # -----------------------------------------------------------------------------
 # Creation  : 09-Jul-2007
-# Last mod  : 10-Jul-2007
+# Last mod  : 27-Jul-2007
 # -----------------------------------------------------------------------------
+
+# TODO: Add async support 
 
 import os, popen2
 MERGETOOL = None
-
-FM_APP    = "/Developer/Applications/Utilities/FileMerge.app/Contents/MacOS/FileMerge"
-GVIMDIFF  = "gvimdiff '%s' '%s'"
-TKDIFF    = "tkdiff '%s' '%s'"
-FILEMERGE = FM_APP + " -left '%s' -right '%s'" 
 
 HELP = """\
 The 'mergetool' module was unable to locate a tool for doing the the merge.
@@ -36,6 +33,35 @@ The supported merge applications are:
 
 """
 
+FILEMERGE = {
+	"APP"     :"opendiff",
+
+	"REVIEW"  :"$0 '$1' '$2'",
+	"REVIEW3" :"$0 '$1' '$2' -ancestor '$3'",
+
+	"MERGE"   :"$0 '$2' '$3' -merge '$1' ",
+	"MERGE3"  :"$0 '$2' '$3' -ancestor '$4' -merge '$1'"
+
+}
+
+GVIMDIFF = {
+	"APP"     : "gvimdiff",
+
+	"REVIEW"  : "$0 '$1' '$2'  " 
+	,
+
+	"REVIEW3"   : "$0 -f '$1' '$2' '$3' " \
+	,
+
+	"MERGE"  : "$0 '$1' '$3'  " \
+	,
+
+	"MERGE3"  : "$0 '$1' '$3' '$4' " \
+
+}
+
+MERGETOOL = None
+
 def popen(command):
 	# FIXME: popen3[1] does not give the same results as popen !!
 	out, sin = popen2.popen4(command)
@@ -52,17 +78,14 @@ def which(program):
 def detectMergeTool():
 	"""Detects the mergetool for this platform."""
 	global MERGETOOL
-	if MERGETOOL: return 
-	if os.environ.has_key("MERGETOOL"):
-		MERGETOOL = os.environ.get("MERGETOOL")
-		return
-	has_gvim    = which("gvimdiff")
-	has_tkdiff  = which("tkdiff")
-	has_fm      = which( FM_APP)
+	if MERGETOOL != None: return MERGETOOL
+	#if os.environ.has_key("MERGETOOL"):
+	#	MERGETOOL = os.environ.get("MERGETOOL")
+	#	return
+	has_gvim    = which(GVIMDIFF["APP"])
+	has_fm      = which(FILEMERGE["APP"])
 	if  has_gvim:
 		MERGETOOL = GVIMDIFF
-	elif has_tkdiff:
-		MERGETOOL = TKDIFF
 	elif has_fm:
 		MERGETOOL = FILEMERGE
 	else:
@@ -70,18 +93,33 @@ def detectMergeTool():
 			"No file merging utility. Please set the MERGETOOL variable\n"
 			+ HELP
 		)
+	MERGETOOL = FILEMERGE
+	return MERGETOOL
 
-def review( a, b ):
-	"""Reviews A and B (without allowing modifications)"""
-	detectMergeTool()
-	command = MERGETOOL % (a,b)
-	return popen(command)
+def _format( line, *args ):
+	"""Replaces '$0', '$1', '$2', ... occurences in 'line' with elements of
+	args."""
+	for i in range(len(args)):
+		line = line.replace("$%d" % (i), args[i])
+	return line
 
-def merge( left, right, base=None ):
-	"""Merges file A with file B."""
-	detectMergeTool()
-	# TODO: Some mergetool do not support destination
-	command = MERGETOOL % (left, right)
-	return popen(command)
+def _do( command, *args ):
+	tool    = detectMergeTool()
+	_args   = [tool["APP"]]
+	_args.extend(args)
+	program = _format(tool[command.upper()], *_args)
+	return os.popen(program +" &").read()
+
+def review( current, other ):
+	return _do("review", current, other)
+
+def review3( current, other, base ):
+	return _do("review3", current, other, base)
+
+def merge( destination, current, other ):
+	return _do("merge", destination, current, other)
+
+def merge3( destination, current, other, base ):
+	return _do("merge3", destination, current, other, base)
 
 # EOF

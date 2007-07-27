@@ -247,17 +247,17 @@ Hdr
 
 Txt Merge
 
-Chc [X:R] Merge R%-3s (current) and R%-3s (other) args:&press=mergeCurrentWithOther
+Chc [X:R] Merge R%-3s (current) and R%-3s (other)
 
 Txt Update
 
-Chc [ :R] Update to R%-3s (current)          args:&press=useCurrent
-Chc [ :R] Update to R%-3s (other)            args:&press=useOther
-Chc [ :R] Update to R%-3s (base)             args:&press=useBase
+Chc [ :R] Update to R%-3s (current)
+Chc [ :R] Update to R%-3s (other)
+Chc [ :R] Update to R%-3s (base)
 
 Txt Keep
 
-Chc [ :R] Keep local  (if you made/make changes manually) args:&press=keepLocal
+Chc [ :R] Keep local  (if you made/make changes manually)
 
 ---
 
@@ -337,35 +337,30 @@ class ResolutionHandler(urwide.Handler):
 		self.easymerge = easymerge
 		self.dialog    = dialog
 		self.conflict  = conflict
-		self.operation = None
-		self.onMergeCurrentWithOther(None,None)
-
-	def onMergeCurrentWithOther(self, *args):
-		self.operation = ("merge", "current", "other", "base")
-
-	def onUseCurrent(self, *args):
-		self.operation = ("use", "current")
-
-	def onUseOther(self, *args):
-		self.operation = ("use", "other")
-
-	def onUseBase(self, *args):
-		self.operation = ("use", "base")
-
-	def onKeepLocal(self, *args):
-		self.operation = ("use", "local")
 
 	def onCancel(self, widget):
 		self.dialog.end()
 
 	def onDoResolve(self, widget):
 		self.dialog.end()
-		print self.operation
-		return
-		if self.operation[0] == "use":
-			self.easymerge.ops.resolveConflictByReplacing(self.conflict.number, *self.operation[1:])
-		elif self.operation[0] == "merge":
-			self.easymerge.ops.resolveConflictByMerging(self.conflict.number, *self.operation[1:])
+		selected = 0
+		for radio in self.dialog.groups.R:
+			if radio.get_state(): break
+			else: selected += 1
+		if  selected == 0:
+			self.easymerge.ops.resolveConflictByMerging(self.conflict.number, "current", "other")
+			self.easymerge.main_ui.tooltip("Conflict was resolved by merging current and other")
+		elif selected == 1:
+			self.easymerge.ops.resolveConflictByReplacing(self.conflict.number, "current")
+			self.easymerge.main_ui.tooltip("Conflict was resolved by updating to current")
+		elif selected == 2:
+			self.easymerge.ops.resolveConflictByReplacing(self.conflict.number, "other")
+			self.easymerge.main_ui.tooltip("Conflict was resolved by updating to other")
+		elif selected == 3:
+			self.easymerge.ops.resolveConflictByReplacing(self.conflict.number, "base")
+			self.easymerge.main_ui.tooltip("Conflict was resolved by updating to base")
+		elif selected == 4:
+			self.easymerge.main_ui.tooltip("Conflict was resolved by keeping the local file")
 		else:
 			raise Exception("Internal error")
 		self.easymerge.updateConflicts()
@@ -535,11 +530,11 @@ class ConsoleUI(urwide.Handler):
 			# Reviews what as changed
 			elif key == "v":
 				pass
-				self.ops.reviewConflict(conflict, left="local", right=widget.get_label())
+				self.ops.reviewConflict(conflict)
 		else:
 			# Reviews the conflict
 			if   key == "v": 
-				self.ops.reviewConflict(conflict, left="local", right=widget.get_label())
+				self.ops.reviewConflict(conflict)
 			# Selects the current choice
 			elif key == "enter" or key == "r":
 				group = conflict._ui_group
@@ -606,6 +601,7 @@ class Conflict:
 	state=None, description="" ):
 		if not state: state = Conflict.UNRESOLVED
 		assert type(number) == int
+		self.conflicts = None
 		self.number = number
 		self.state  = state
 		self._path  = path
@@ -622,13 +618,16 @@ class Conflict:
 	def describe( self ):
 		l,c,b,o = self._sigs()
 		if l == c:
-			return "same as current (not modified)"
-		elif l == "b":
-			return "same as base (reverted to base)"
-		elif l == "o":
-			return "same as other (updated to other)"
+			return "No modifications (R%s)" % (self.conflicts.getCurrentInfo()[0])
+		elif l == b:
+			return "Same as BASE     (R%s)" % (self.conflicts.getBaseInfo()[0])
+		elif l == o:
+			return "Same as OTHER    (R%s)" % (self.conflicts.getOtherInfo()[0])
 		else:
-			return "merged manually"
+			return "Merged           (R%s+R%s)" % (
+				(self.conflicts.getCurrentInfo()[0]),
+				(self.conflicts.getOtherInfo()[0])
+			)
 
 	def resolve(self):
 		self.state = self.RESOLVED
@@ -776,19 +775,28 @@ class Conflicts:
 		for line in f.readlines():
 			if line.startswith("CURRENT:"):
 				self.setCurrentInfo(eval(line[len("CURRENT:"):-1].strip()))
-			elif line.startswith("PARENT:"):
-				self.setBaseInfo(eval(line[len("PARENT:"):-1].strip()))
+			elif line.startswith("BASE:"):
+				self.setBaseInfo(eval(line[len("BASE:"):-1].strip()))
 			elif line.startswith("OTHER:"):
 				self.setOtherInfo(eval(line[len("OTHER:"):-1].strip()))
 			else:
 				result = Conflict.parse(line[:-1], number=len(self._conflicts))
+				result.conflicts = self
 				if result: self._conflicts.append(result)
 		f.close()
 
 	def save( self ):
 		"""Writes back the conflicts to the file, overwriting it."""
+		res = ""
+		res += "CURRENT:" + repr(self.getCurrentInfo()) + "\n"
+		res += "OTHER:  " + repr(self.getOtherInfo())   + "\n"
+		res += "BASE: "   + repr(self.getBaseInfo())  + "\n"
+		for conflict in self._conflicts:
+			res += str(conflict) + "\n"
+		res = res[:-1]
+		# We remove the trailing EOL
 		f = file(self._path, "w")
-		f.write(str(self))
+		f.write(res)
 		f.close()
 
 	def all( self ):
@@ -840,9 +848,6 @@ class Conflicts:
 		res = ""
 		unresolved = self.unresolved()
 		resolved   = self.resolved()
-		res += "CURRENT:" + repr(self.getCurrentInfo()) + "\n"
-		res += "PARENT: " + repr(self.getBaseInfo())  + "\n"
-		res += "OTHER:  " + repr(self.getOtherInfo())   + "\n"
 		# We handle unresolved conflicts
 		if unresolved:
 			for conflict in unresolved:
@@ -912,18 +917,13 @@ class Operations:
 		"""Lists the conflicts in the given directory."""
 		self.output(self.conflicts.asString(self.color))
 
-	def reviewConflict( self, conflict, left="local", right="base" ):
+	def reviewConflict( self, conflict ):
 		"""Reviews the given conflict, by comparing its current revision to the
 		base revision."""
-		paths = {
-			"local":conflict.path(),
-			"current":conflict.current(),
-			"base":conflict.base(),
-			"other":conflict.other()
-		}
-		assert left in paths.keys()
-		assert right in paths.keys()
-		mergetool.review(paths[left], paths[right])
+		if type(conflict) == int:
+			conflict = self.getUnresolvedConflict(number)
+		mergetool.review3( conflict.path(), conflict.other(), conflict.base())
+		mergetool.review3( conflict.path(), conflict.current(), conflict.base())
 
 	def getUnresolvedConflict( self, number ):
 		"""Returns an unresolved Conflict instance corresponding to the given
@@ -956,7 +956,7 @@ class Operations:
 				self.format("merging",color=BLUE,  weight=BOLD)
 		)
 		copy(left, conflict.path())
-		mergetool.merge(conflict.path(), right, base)
+		mergetool.merge(conflict.path(), left, right)
 		res = self.ask("Did you resolve the conflict (y/n) ? ")
 		if res == "y":
 			self.info("Conflict resolved")
@@ -1082,7 +1082,10 @@ def hg_get_merge_revisions(path="."):
 			res.append(info)
 	# FIXME: Awful hack, but we need to get the details about the revision
 	if len(res) == 2:
-		rev = os.environ["HG_BASE_NODE"]
+		if os.environ.has_key("HG_BASE_NODE"):
+			rev = os.environ["HG_BASE_NODE"]
+		else:
+			rev = "0"
 		info = [rev]
 		info.extend(hg_get_revision_info(rev,path))
 		res.append(info)
@@ -1150,6 +1153,7 @@ def run(args):
 			return -1
 	# Command: ORIGINAL PARENT NEWER
 	elif len(args) == 3:
+		print
 		info("Registering conflict")
 		# We prepare the destination paths
 		original, base, other = map(os.path.abspath, args)
@@ -1160,8 +1164,9 @@ def run(args):
 		base_copy             = original + ".base-r"  + cnf.getBaseInfo()[0]
 		other_copy              = original + ".other-r"   + cnf.getOtherInfo()[0]
 		conflict = ops.addConflicts(original, original_copy, base_copy, other_copy)
-		print "Conflict %4d:" % (conflict.number)
-		print cutpath(root, original), "[" + str(int(diff_count(original, other))) + "% equivalent]"
+		print "Conflict %4d:%-40s %s" % (conflict.number,
+			cutpath(root, original), "[" + str(int(diff_count(original, other))) + "% equivalent]"
+		)
 		print "  base       ", cutpath(root, base_copy)
 		print "  current    ", cutpath(root, original_copy)
 		print "  other      ", cutpath(root, other_copy)
