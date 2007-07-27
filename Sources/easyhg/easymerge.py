@@ -199,8 +199,10 @@ Text*         : WH, DM, BO
 
 #edit_summary : DM, DB, SO
 """
+
 DIALOG_STYLE = """
 header        : BL, Lg, BO
+Hdr           : BL, Lg, BO
 """
 
 CONSOLE_UI = """\
@@ -216,10 +218,7 @@ $REVINFO
 Col
     Txt  Path
     Txt Status
-    Txt Action
-    Txt Review
-    Txt 
-    Txt 
+    Txt Details
 End
 
 Col                                 #conflicts
@@ -227,9 +226,7 @@ Col                                 #conflicts
     End
     Ple                             #state
     End
-    Ple                             #action
-    End
-    Ple                             #review
+    Ple                             #details
     End
 End
 
@@ -280,28 +277,43 @@ GFl
     Btn [Yes]                       #yes
 End
 """
-ASK_UNRESOLUTION = """
-Hdr Conflict resolution undo
 
-Txt Unresolving a conflict will change the state of your conflict file
-Txt to where it was. This is the equivalent of an `hg revert` on your
+ASK_UNRESOLUTION = """
+Hdr Undo conflict resolution
+
+Txt Unresolving a conflict will change
+Txt the state of your conflict file
+Txt to where it was. This is the equivalent
+Txt of an `hg revert` on your
 Txt conflict file.
 
-Txt However, your changes will be saved in a `.merge` file, so you
-Txt can copy it over your current files to redo the resolution.
-
+Txt However, your changes will be saved in as
+Txt
+Txt %s
+Txt
+Txt so you can copy it over your current
+Txt
+Txt %s
+Txt
+Txt to redo the resolution.
+---
 Txt Would you like to proceed ?
-
 GFl
     Btn [No]                        #no
     Btn [Yes]                       #yes
 End
 """
 
-SHOW_MESSAGE = """
-Hdr %s
+INFO_UNRESOLUTION = """
+Hdr Conflict unresolved
 
-Txt %s
+Txt Your changes were saved to
+Txt
+Txt   %s
+Txt
+Txt The local file was left as it is.
+Txt It won't be modified until you resolve
+Txt and merge or replace the file.
 
 GFl
     Btn [OK]                        #ok
@@ -326,41 +338,37 @@ class ResolutionHandler(urwide.Handler):
 		self.dialog    = dialog
 		self.conflict  = conflict
 		self.operation = None
-		self.onMergeBaseWithOther(None,None)
+		self.onMergeCurrentWithOther(None,None)
 
 	def onMergeCurrentWithOther(self, *args):
-		self.operation = ("merge", self.conflict.current(), self.conflict.other())
-
-	def onMergeBaseWithOther(self, *args):
-		self.operation = ("merge", self.conflict.base(), self.conflict.other())
+		self.operation = ("merge", "current", "other", "base")
 
 	def onUseCurrent(self, *args):
-		self.operation = ("use", self.conflict.current())
+		self.operation = ("use", "current")
 
 	def onUseOther(self, *args):
-		self.operation = ("use", self.conflict.other())
+		self.operation = ("use", "other")
 
 	def onUseBase(self, *args):
-		self.operation = ("use", self.conflict.base())
+		self.operation = ("use", "base")
 
 	def onKeepLocal(self, *args):
-		self.operation = ("use", self.conflict.path())
+		self.operation = ("use", "local")
 
 	def onCancel(self, widget):
 		self.dialog.end()
 
 	def onDoResolve(self, widget):
 		self.dialog.end()
-
-	def onKeyPress( self, widget, key ):
-		if   key == "r":
-			self.onResolve(widget)
-		elif key == "c":
-			self.onCancel(widget)
-			self._radioButtonTrue(1)
+		print self.operation
+		return
+		if self.operation[0] == "use":
+			self.easymerge.ops.resolveConflictByReplacing(self.conflict.number, *self.operation[1:])
+		elif self.operation[0] == "merge":
+			self.easymerge.ops.resolveConflictByMerging(self.conflict.number, *self.operation[1:])
 		else:
-			return False
-
+			raise Exception("Internal error")
+		self.easymerge.updateConflicts()
 
 class ConsoleUI(urwide.Handler):
 	"""Main user interface for easymerge."""
@@ -383,7 +391,7 @@ class ConsoleUI(urwide.Handler):
 		self.ui.handler(self)
 		self.ui.data.conflicts = conflicts
 		self.ui.strings.RESOLVED   = "RESOLVED   [V]iew | [U]nresolve | [Q]uit"
-		self.ui.strings.UNRESOLVED = "UNRESOLVED [V]iew | Resolve by [R]eplacing or [M]erging | [Q]uit"
+		self.ui.strings.UNRESOLVED = "UNRESOLVED [V]iew | [R]esolve   | [Q]uit"
 
 	def conflicts( self ):
 		"""Returns the conflicts associated with this UI."""
@@ -437,49 +445,35 @@ class ConsoleUI(urwide.Handler):
 		def finish( widget ):
 			self.main_ui._widgets[widget].set_focus(0)
 		# We clear the Ple (Piles)
-		map(clear, "conflict state action review".split())
+		map(clear, "conflict state details".split())
 		# We register the conflicts
 		for c in self.main_ui.data.conflicts.all():
 			group = []
-			edit  = add(c, "conflict", urwid.Edit, " " + c.path())
-			state = add(c, "state",    urwid.Text, (c.state.lower(), c.state))
-			action= add(c, "action",   urwid.Button, ("Resolve"))
-			cur   = add(c, "review",   urwid.RadioButton, group, "current", False)
-			par   = add(c, "review",   urwid.RadioButton, group, "base", False)
-			oth   = add(c, "review" ,  urwid.RadioButton, group, "other",  False)
+			edit    = add(c, "conflict", urwid.Edit, " " + c.path())
+			state   = add(c, "state",    urwid.Text, (c.state.lower(), c.state))
+			# FIXME: Update this
+			details = add(c, "details",  urwid.Text, c.describe())
 			c._ui_state = state
 			c._ui_group = group
-			# We bind events
-			self.main_ui.onKey(action, self.onResolve)
-			self.main_ui.unwrap(action)._conflict = c
-			for w in (edit, cur, par, oth):
+			for w in (edit,):
 				self.main_ui.setTooltip(w, c.state.upper())
 				self.main_ui.onKey(w, self.onConflict)
 				self.main_ui.onFocus(w, self.onConflictFocus)
 			self._updateConflictView(c)
 			#conflict.add_widget(self.ui.wrap(conflict, "@unresolved &key=resolve ?UNRESOLVED"))
 		# We notify that the Ple (Piles) construction is finished
-		map(finish, "conflict state action review".split())
+		map(finish, "conflict state details".split())
 
 	def _updateConflictView( self, conflict ):
-		loc, cur, par, oth = conflict._sigs()
-		map(lambda w:w.set_state(False), conflict._ui_group)
-		if conflict.getState() == conflict.UNRESOLVED:
-			map(lambda w:w.set_state(False), conflict._ui_group)
-		else:
-			if loc == cur:
-				conflict._ui_group[0].set_state( True )
-			elif loc == par:
-				conflict._ui_group[1].set_state( True )
-			elif loc == oth:
-				conflict._ui_group[2].set_state( True )
+		# TODO: Change resolution type
+		pass
 
-	def onResolve( self, widget, key=None ):
+	def onResolveConflict( self, conflict ):
+		"""Resolves the given conflict by popping up a dialog."""
 		# TODO: Get widget conflict
-		if not key in ( "enter", "r"): return
 		c, o, p = self.conflictsInfo()
 		ui = DLG_RESOLVE % (
-			widget._conflict.path(),
+			conflict.path(),
 			c[0], o[0],
 			c[0],
 			o[0],
@@ -488,7 +482,7 @@ class ConsoleUI(urwide.Handler):
 		dialog = urwide.Dialog(self.ui, ui=ui,palette=DIALOG_STYLE,width=60)
 		self.main_ui.dialog(dialog)
 		# NOTE: If I move this elsewhere, it will fail ! (Python bug)
-		handler = ResolutionHandler(self,dialog,widget._conflict)
+		handler = ResolutionHandler(self,dialog,conflict)
 		dialog.handler(handler)
 
 	def onConflictFocus( self, widget ):
@@ -504,16 +498,8 @@ class ConsoleUI(urwide.Handler):
 			self.main_ui.setInfo(widget, "RESOLVED")
 		else:
 			self.main_ui.setInfo(widget, "UNRESOLVED")
-		if   widget == conflict._ui_group[0]:
-			self.main_ui.setTooltip(widget, info(conflict.current()))
-		elif widget == conflict._ui_group[1]:
-			self.main_ui.setTooltip(widget, info(conflict.base()))
-		elif widget == conflict._ui_group[2]:
-			self.main_ui.setTooltip(widget, info(conflict.other()))
-		else:
-			self.main_ui.setTooltip(widget, info(conflict.path()))
 
-	def _unresolveConflict( self, conflict, callback=False ):
+	def onUnresolveConflict( self, conflict, callback=False ):
 		# If the current resolved version was resolved form base or other, we
 		# do not need to save a backup
 		if conflict._sig(conflict.path()) in (conflict._sig(conflict.base()),
@@ -524,15 +510,17 @@ class ConsoleUI(urwide.Handler):
 			conflict._ui_state.set_text((conflict.state.lower(), conflict.state))
 			self._updateConflictView(conflict)
 			if backup:
-				dialog = urwide.Dialog(self.ui, ui=SHOW_MESSAGE % (
-					"Conflict unresolved",
-					"Your changes were saved to `%s`" % (backup[0])
-				), style=DIALOG_STYLE)
+				dialog = urwide.Dialog(self.ui, ui=INFO_UNRESOLUTION % (backup[0]), style=DIALOG_STYLE)
 				dialog.onPress(dialog.widgets.ok , lambda x:dialog.end())
 				self.main_ui.dialog(dialog)
 		else:
-			dialog = urwide.Dialog(self.ui, ui=ASK_UNRESOLUTION, style=DIALOG_STYLE)
-			dialog.onPress(dialog.widgets.yes, lambda x:cmp(dialog.end(), self._unresolveConflict(conflict, True)))
+			dialog = urwide.Dialog(self.ui,
+				ui=ASK_UNRESOLUTION % (conflict.nextMerge(), conflict.path() ),
+				width=45,
+				height=23,
+				style=DIALOG_STYLE
+			)
+			dialog.onPress(dialog.widgets.yes, lambda x:cmp(dialog.end(), self.onUnresolveConflict(conflict, True)))
 			dialog.onPress(dialog.widgets.no , lambda x:dialog.end())
 			self.main_ui.dialog(dialog)
 		return True
@@ -543,31 +531,25 @@ class ConsoleUI(urwide.Handler):
 		if conflict.state == Conflict.RESOLVED:
 			# Undoes the conflict
 			if   key == "u":
-				self._unresolveConflict(conflict)
+				self.onUnresolveConflict(conflict)
 			# Reviews what as changed
-			elif key == "enter" or key == "v":
+			elif key == "v":
+				pass
 				self.ops.reviewConflict(conflict, left="local", right=widget.get_label())
 		else:
 			# Reviews the conflict
 			if   key == "v": 
 				self.ops.reviewConflict(conflict, left="local", right=widget.get_label())
-			# Merges the base and other manually
-			elif key == "m":
-				self.ops.resolveConflictByMerging( widget.conflict.number, widget.get_label())
-				self._updateConflictView(conflict)
-			elif key == "r":
-				self.ops.resolveConflictByReplacing( widget.conflict.number, widget.get_label())
-				self._updateConflictView(conflict)
 			# Selects the current choice
-			elif key == "enter" or key == " ":
+			elif key == "enter" or key == "r":
 				group = conflict._ui_group
-				if widget == group[0]: self.onConflict(widget, "m")
-				elif widget == group[1]: self.onConflict(widget, "m")
-				elif widget == group[2]: self.onConflict(widget, "m")
-				else: raise Exception("Unexpected widget: " + str(widget))
+				if widget.conflict.isResolved():
+					self.onUnResolve(widget, conflict)
+				else:
+					self.onResolveConflict(conflict)
 				self._updateConflictView(conflict)
 			else:
-				return False
+				return None
 
 	def onKeyPress( self, widget, key ):
 		if  key == "q":
@@ -619,9 +601,6 @@ class Conflict:
 	RESOLVED   = "RESOLVED"
 	UNRESOLVED = "UNRESOLVED"
 	SEPARATOR  = " -- "
-	PARENT     = "base"
-	OTHER      = "other"
-	MERGED     = "merged"
 
 	def __init__( self, number, path, currentPath, basePath, otherPath,
 	state=None, description="" ):
@@ -639,6 +618,17 @@ class Conflict:
 		"""Returns the state for this conflict (Conflict.RESOLVED or
 		Conflict.UNRESOLVED)"""
 		return self.state
+
+	def describe( self ):
+		l,c,b,o = self._sigs()
+		if l == c:
+			return "same as current (not modified)"
+		elif l == "b":
+			return "same as base (reverted to base)"
+		elif l == "o":
+			return "same as other (updated to other)"
+		else:
+			return "merged manually"
 
 	def resolve(self):
 		self.state = self.RESOLVED
@@ -689,17 +679,8 @@ class Conflict:
 		return self._sig(self.path()), self._sig(self.current()), \
 		self._sig(self.base()), self._sig(self.other())
 
-	def resolutionType( self ):
-		assert self.state == self.RESOLVED
-		c = self._read(self.path())
-		p = self._read(self.base())
-		o = self._read(self.other())
-		if c == p:
-			return self.PARENT
-		elif c == o:
-			return self.OTHER
-		else:
-			return self.MERGED
+	def isResolved( self ):
+		return self.state == self.RESOLVED
 
 	@staticmethod
 	def parse( line, number=-1 ):
@@ -708,12 +689,14 @@ class Conflict:
 		line     = line.strip() + " "
 		if not line: return
 		number, l, c, p, o, d = line.split(" : ")
-		if number.startswith("R"):
+		if number.strip().upper().startswith("R"):
 			status = Conflict.RESOLVED
 			number = number[1:]
-		else: status = Conflict.UNRESOLVED
+		else:
+			status = Conflict.UNRESOLVED
 		description = ""
 		c = Conflict(int(number), l, c, p, o, d)
+		c.state = status
 		return c
 
 	def asString( self ):
@@ -887,6 +870,8 @@ class Conflicts:
 # -----------------------------------------------------------------------------
 
 class Operations:
+	"""Implements operations that can be triggered either from the UI and from
+	the command line"""
 
 	def __init__( self, conflicts ):
 		self.conflicts = conflicts
@@ -945,7 +930,7 @@ class Operations:
 		number, or returns False and takes care of displaying the proper error
 		messages."""
 		conflicts = self.conflicts
-		number	= int(number)
+		number    = int(number)
 		conflict  = conflicts.unresolved(number)
 		if not conflict:
 			self.error("No conflict found: %s" % (number))
@@ -955,21 +940,23 @@ class Operations:
 			return False
 		return conflict
 
-	def resolveConflictByMerging( self, number, mergeWith ):
+	def resolveConflictByMerging( self, number, left="current", right="other", base="base" ):
 		"""Resolves the given conflict by merging the local file with the given
-		merge ('current', 'base' or 'other'). This fires the mergetool to do
+		merge. This fires the mergetool to do
 		the merge."""
 		conflict = self.getUnresolvedConflict(number)
 		if not conflict: return
-		if   mergeWith == "current": target = conflict.current()
-		elif mergeWith == "base":  target = conflict.base()
-		elif mergeWith == "other":  target = conflict.other()
-		else: raise Exception("Unknown merge target: " + mergeWith)
+		paths = {
+			"current":conflict.current(),
+			"base":conflict.base(),
+			"other":conflict.other()
+		}
+		left, right, base = map(lambda x:paths.get(x.lower()),(left,right,base))
 		self.log("Resolving conflict", conflict.path() ,"by",
-				self.format("merging with",color=BLUE,  weight=BOLD),
-				target
+				self.format("merging",color=BLUE,  weight=BOLD)
 		)
-		mergetool.merge(conflict.path(), target)
+		copy(left, conflict.path())
+		mergetool.merge(conflict.path(), right, base)
 		res = self.ask("Did you resolve the conflict (y/n) ? ")
 		if res == "y":
 			self.info("Conflict resolved")
@@ -981,14 +968,18 @@ class Operations:
 		'replaceWith'"""
 		conflict = self.getUnresolvedConflict(number)
 		if not conflict: return
-		if   replaceWith == "current": target = conflict.current()
-		elif replaceWith == "base":  target = conflict.base()
-		elif replaceWith == "other":  target = conflict.other()
-		else: raise Exception("Unknown merge target: " + replaceWith)
+		paths = {
+			"current":conflict.current(),
+			"base":conflict.base(),
+			"other":conflict.other()
+		}
+		replace_with = paths.get(replaceWith.lower())
+		if not replace_with:
+			raise Exception("Unknown merge target: " + replaceWith)
 		self.log("Resolving conflict", conflict.path() ,"by",
 				self.format("replacing with",color=BLUE,  weight=BOLD),
-				target)
-		copy(target, conflict.path())
+				replaceWith)
+		copy(replace_with, conflict.path())
 		res = self.ask("Did you resolve the conflict (y/n) ? ")
 		if res == "y":
 			self.info("Conflict resolved")
@@ -1005,7 +996,7 @@ class Operations:
 				warning("No conflict to resolve")
 				return
 			for conflict in unresolved:
-				# FIXME: Add choice of actiono
+				# FIXME: Add choice of action
 				self.resolveConflict(conflict.number) 
 		else:
 			for number in numbers:

@@ -56,7 +56,7 @@ def detectMergeTool():
 	if os.environ.has_key("MERGETOOL"):
 		MERGETOOL = os.environ.get("MERGETOOL")
 		return
-	has_gvim    = which("gvdimdiff")
+	has_gvim    = which("gvimdiff")
 	has_tkdiff  = which("tkdiff")
 	has_fm      = which( FM_APP)
 	if  has_gvim:
@@ -77,10 +77,11 @@ def review( a, b ):
 	command = MERGETOOL % (a,b)
 	return popen(command)
 
-def merge( a, b ):
+def merge( left, right, base=None ):
 	"""Merges file A with file B."""
 	detectMergeTool()
-	command = MERGETOOL % (a,b)
+	# TODO: Some mergetool do not support destination
+	command = MERGETOOL % (left, right)
 	return popen(command)
 
 # EOF
