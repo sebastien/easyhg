@@ -22,7 +22,7 @@ try:
 except:
 	urwide = None
 
-__version__ = "0.9.3"
+__version__ = "0.9.4"
 PROGRAM_NAME = os.path.splitext(os.path.basename(__file__))[0]
 
 USAGE = """\

@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 # Encoding: iso-8859-1
-# vim: tw=80 ts=4 sw=4 noet fenc=latin-1
 # -----------------------------------------------------------------------------
 # Project   : Mercurial - Easycommit
 # License   : GNU Public License         <http://www.gnu.org/licenses/gpl.html>
@@ -8,22 +7,21 @@
 # Author    : Sébastien Pierre                           <sebastien@type-z.org>
 # -----------------------------------------------------------------------------
 # Creation  : 10-Jul-2006
-# Last mod  : 30-Mar-2007
+# Last mod  : 30-Jul-2007
 # -----------------------------------------------------------------------------
 
 import sys, os, re, time, stat, tempfile
 import urwide, urwid
 
-try:
-	from mercurial.demandload import demandload
-	from mercurial.i18n import gettext as _
-except:
-	print "Failed to load Mercurial modules."
-	sys.exit(-1)
+from mercurial.i18n import gettext as _
+import mercurial
+import mercurial.commands
+import mercurial.localrepo
+# FIX for 0.9.4 version of Mercurial
+from mercurial import demandimport
+demandimport.ignore.append('str_util')
 
-demandload(globals(), 'mercurial.ui mercurial.util mercurial.commands mercurial.localrepo')
-
-__version__ = "0.9.3"
+__version__ = "0.9.4"
 __doc__     = """\
 Easycommit is a tool that allows better, richer, more structured commits for
 Mercurial. It eases the life of the developers and enhances the quality and
@@ -444,10 +442,17 @@ def commit_wrapper(repo, files=None, text="", user=None, date=None,
 def command_defaults(ui, cmd):
 	"""Returns the default option values for the given Mercurial command. This
 	was taken from the Tailor conversion script."""
-	if hasattr(mercurial.commands, 'findcmd'):
-		findcmd = mercurial.commands.findcmd
-	else:
+	import mercurial.commands
+	# Mercurial 0.9.1
+	if hasattr(mercurial.commands, 'find'):
 		findcmd = mercurial.commands.find
+	# Mercurial 0.9.3
+	elif hasattr(mercurial.commands, 'findcmd'):
+		findcmd = mercurial.commands.findcmd
+	# Mercurial 0.9.4
+	else:
+		import mercurial.cmdutil
+		findcmd = mercurial.cmdutil.findcmd
 	return dict([(f[1].replace('-', '_'), f[2]) for f in findcmd(ui, cmd)[1][1]])
 
 def easy_commit( ui, repo, *args, **opts ):
@@ -475,4 +480,4 @@ def easy_commit( ui, repo, *args, **opts ):
 COMMIT_COMMAND =  mercurial.commands.table["^commit|ci"]
 cmdtable = { "commit": (easy_commit,  COMMIT_COMMAND[1],    COMMIT_COMMAND[2])}
 
-# EOF
+# EOF - vim: tw=80 ts=4 sw=4 noet

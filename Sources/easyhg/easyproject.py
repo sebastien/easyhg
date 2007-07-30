@@ -230,7 +230,7 @@ class DevelopmentRepository(ProjectRepository):
 		if not self._parent:
 			self._parent = Repository_load(self._property("project.parent"))
 		return self._parent
- 
+
 	def isModified( self ):
 		"""Tells wether this repository has outgoing changesets."""
 		mods = self.modifications()
