@@ -7,14 +7,13 @@
 # Author    : Sebastien Pierre                           <sebastien@xprima.com>
 # -----------------------------------------------------------------------------
 # Creation  : 05-May-2006
-# Last mod  : 26-Jul-2007
+# Last mod  : 30-Jul-2007
 # -----------------------------------------------------------------------------
 
 # TODO: cache the hg_get_merge_revisions in the conflict file
 # Origins:
 #  - http://marc.info/?l=mercurial&m=114719261130043&w=2
 #  - http://marc.info/?t=114719277400001&r=1&w=2
-
 
 import os, sys, re, shutil, difflib, stat, sha
 import mergetool
@@ -311,9 +310,9 @@ Txt Your changes were saved to
 Txt
 Txt   %s
 Txt
-Txt The local file was left as it is.
-Txt It won't be modified until you resolve
-Txt and merge or replace the file.
+Txt The local file was reverted to current
+Txt
+Txt   %s
 
 GFl
     Btn [OK]                        #ok
@@ -361,6 +360,7 @@ class ResolutionHandler(urwide.Handler):
 			self.easymerge.main_ui.tooltip("Conflict was resolved by updating to base")
 		elif selected == 4:
 			self.easymerge.main_ui.tooltip("Conflict was resolved by keeping the local file")
+			self.easymerge.ops.resolveConflictByKeepingLocal(self.conflict.number)
 		else:
 			raise Exception("Internal error")
 		self.easymerge.updateConflicts()
@@ -505,7 +505,7 @@ class ConsoleUI(urwide.Handler):
 			conflict._ui_state.set_text((conflict.state.lower(), conflict.state))
 			self._updateConflictView(conflict)
 			if backup:
-				dialog = urwide.Dialog(self.ui, ui=INFO_UNRESOLUTION % (backup[0]), style=DIALOG_STYLE)
+				dialog = urwide.Dialog(self.ui, ui=INFO_UNRESOLUTION % (backup[0], conflict.current()), style=DIALOG_STYLE)
 				dialog.onPress(dialog.widgets.ok , lambda x:dialog.end())
 				self.main_ui.dialog(dialog)
 		else:
@@ -701,14 +701,23 @@ class Conflict:
 	def asString( self ):
 		a = cutpath(os.path.abspath(os.getcwd()), self.path())
 		b = cutpath(os.path.abspath(os.getcwd()), self.current())
-		c = cutpath(os.path.abspath(os.getcwd()), self.base())
-		d = cutpath(os.path.abspath(os.getcwd()), self.other())
-		p = self.state == self.RESOLVED and "R" or ""
-		return "%s%4s : %s : %s : %s : %s : %s" % (p, self.number,
-		a,b,c,d,self.description)
+		c = cutpath(os.path.abspath(os.getcwd()), self.other())
+		d = cutpath(os.path.abspath(os.getcwd()), self.base())
+		p = self.state == self.RESOLVED and "R" or " "
+		# TODO: Add explanation for resolution (like "same as other")
+		return "%s%4s: %s -> %s (current) | %s (other) | %s (base)" % (
+			p, self.number,
+			a,b,c,d
+		)
 
 	def __str__( self ):
-		return self.asString()
+		a = cutpath(os.path.abspath(os.getcwd()), self.path())
+		b = cutpath(os.path.abspath(os.getcwd()), self.current())
+		c = cutpath(os.path.abspath(os.getcwd()), self.base())
+		d = cutpath(os.path.abspath(os.getcwd()), self.other())
+		p = self.state == self.RESOLVED and "R" or " "
+		return "%s%4s : %s : %s : %s : %s : %s" % (p, self.number,
+		a,b,c,d,self.description)
 
 # -----------------------------------------------------------------------------
 #
@@ -765,7 +774,7 @@ class Conflicts:
 		"""Reads the conflicts from the file, if it exists"""
 		self._conflicts = []
 		if not os.path.isfile(self._path):
-			ci, pi, oi = hg_get_merge_revisions(os.path.dirname(self._path))
+			ci, oi, pi = hg_get_merge_revisions(os.path.dirname(self._path))
 			self.setCurrentInfo(ci)
 			self.setBaseInfo(pi)
 			self.setOtherInfo(oi)
@@ -852,16 +861,16 @@ class Conflicts:
 		if unresolved:
 			for conflict in unresolved:
 				if color:
-					res += format(str(conflict), color=RED) + "\n"
+					res += format(conflict.asString(), color=RED) + "\n"
 				else:
-					res += str(conflict) + "\n"
+					res += conflict.asString() + "\n"
 		# And handle resolved conflicts
 		if resolved:
 			for conflict in resolved:
 				if color:
-					res += format(str(conflict), color=GREEN) + "\n"
+					res += format(conflict.asString(), color=GREEN) + "\n"
 				else:
-					res += str(conflict) + "\n"
+					res += conflict.asString() + "\n"
 		# We remove the trailing EOL
 		return res[:-1]
 
@@ -984,6 +993,13 @@ class Operations:
 		if res == "y":
 			self.info("Conflict resolved")
 			conflict.resolve()
+		self.conflicts.save()
+
+	def resolveConflictByKeepingLocal( self, number, ):
+		"""Resolves the conflict by updating the local file."""
+		conflict = self.getUnresolvedConflict(number)
+		if not conflict: return
+		conflict.resolve()
 		self.conflicts.save()
 
 	def resolveConflicts( self, *numbers):
@@ -1109,13 +1125,26 @@ def run(args):
 	elif len(args) >= 1 and args[0] == "resolve":
 		ops  = Operations(Conflicts(root))
 		conflicts = filter(lambda c:RE_NUMBER.match(c), args[1:])
+		# TODO: Implement this properly
 		if len(conflicts) == 1:
 			conflict = conflicts[0]
 			if   len(args) == 2:
-				ops.resolveConflict(conflict, "merge")
-			elif len(args) == 3:
-				action = args[2].lower()
-				ops.resolveConflict(conflict, action)
+				ops.resolveConflictByMerging(conflict)
+			elif len(args) >= 3:
+				actions = args[2:]
+				action  = actions[0]
+				if len(actions) == 1:
+					if action == "keep":
+						ops.resolveConflictByKeepingLocal(conflict)
+					elif action == "merge":
+						ops.resolveConflictByMerging(conflict)
+					elif action == "use":
+						error("resolve use expects either 'base', 'parent' 'current' or revision number")
+					else:
+						error("resolve expects a list of conflicts, or a conflict and an action")
+				elif len(actions) == 2:
+					arg = actions[1]
+					assert None, "Not implemented"
 			else:
 				error("resolve expects a list of conflicts, or a conflict and an action")
 		else:
@@ -1151,37 +1180,37 @@ def run(args):
 		else:
 			info("Commit aborted, nothing done")
 			return -1
-	# Command: ORIGINAL PARENT NEWER
+	# Command: CURRENT BASE OTHER (invoked by 'hg merge')
 	elif len(args) == 3:
-		print
 		info("Registering conflict")
 		# We prepare the destination paths
-		original, base, other = map(os.path.abspath, args)
+		local, base, other = map(os.path.abspath, args)
 		# We print the conflict
 		cnf  = Conflicts(root)
 		ops  = Operations(cnf)
-		original_copy           = original + ".current-r" + cnf.getCurrentInfo()[0]
-		base_copy             = original + ".base-r"  + cnf.getBaseInfo()[0]
-		other_copy              = original + ".other-r"   + cnf.getOtherInfo()[0]
-		conflict = ops.addConflicts(original, original_copy, base_copy, other_copy)
+		current_copy            = local + ".current-r" + cnf.getCurrentInfo()[0]
+		base_copy               = local + ".base-r"  + cnf.getBaseInfo()[0]
+		other_copy              = local + ".other-r"   + cnf.getOtherInfo()[0]
+		conflict = ops.addConflicts(local, current_copy, base_copy, other_copy)
 		print "Conflict %4d:%-40s %s" % (conflict.number,
-			cutpath(root, original), "[" + str(int(diff_count(original, other))) + "% equivalent]"
+			cutpath(root, local), "[" + str(int(diff_count(local, other))) + "% equivalent]"
 		)
 		print "  base       ", cutpath(root, base_copy)
-		print "  current    ", cutpath(root, original_copy)
+		print "  current    ", cutpath(root, current_copy)
 		print "  other      ", cutpath(root, other_copy)
 		# We backup .orig, .base and .new that may already be tehre
 		try:
-			map(ensure_notexists, (base_copy, original_copy, other_copy))
+			map(ensure_notexists, (base_copy, current_copy, other_copy))
 		except Exception:
 			error("Previous conflict files present. Please run", PROGRAM_NAME, "clean")
 			return -1
 		# And we create the new ones
-		shutil.copyfile(original, original_copy)
-		shutil.copyfile(base,   base_copy)
-		shutil.copyfile(other,    other_copy)
+		shutil.copyfile(local, current_copy)
+		shutil.copyfile(base,  base_copy)
+		shutil.copyfile(other, other_copy)
 		map(lambda p:os.chmod(p, stat.S_IREAD|stat.S_IRUSR|stat.S_IRGRP),
-		(original_copy, base_copy, other_copy))
+		(current_copy, base_copy, other_copy))
+		print
 		#info("You can resolve conflicts with:", PROGRAM_NAME, "resolve 0 (keep|update|merge)")
 		return 0
 	else:
