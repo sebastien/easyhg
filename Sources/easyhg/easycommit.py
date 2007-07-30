@@ -18,8 +18,11 @@ import mercurial
 import mercurial.commands
 import mercurial.localrepo
 # FIX for 0.9.4 version of Mercurial
-from mercurial import demandimport
-demandimport.ignore.append('str_util')
+try:
+	from mercurial import demandimport
+	demandimport.ignore.append('str_util')
+except:
+	pass
 
 __version__ = "0.9.4"
 __doc__     = """\

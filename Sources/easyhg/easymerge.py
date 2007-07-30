@@ -11,6 +11,7 @@
 # -----------------------------------------------------------------------------
 
 # TODO: cache the hg_get_merge_revisions in the conflict file
+
 # Origins:
 #  - http://marc.info/?l=mercurial&m=114719261130043&w=2
 #  - http://marc.info/?t=114719277400001&r=1&w=2
