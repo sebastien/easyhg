@@ -12,6 +12,7 @@
 
 import sys, os, re, time, stat, tempfile
 import urwide, urwid
+import easyhg.mergetool as mergetool
 
 from mercurial.i18n import gettext as _
 import mercurial
@@ -30,10 +31,6 @@ Easycommit is a tool that allows better, richer, more structured commits for
 Mercurial. It eases the life of the developers and enhances the quality and
 consistency of commits.
 """
-
-# Can be gview -db 
-REVIEWTOOL = 'gvimdiff'
-if os.environ.has_key("REVIEWTOOL"): REVIEWTOOL = os.environ.get("REVIEWTOOL")
 
 # ------------------------------------------------------------------------------
 #
@@ -254,7 +251,7 @@ class ConsoleUIHandler(urwide.Handler):
 		os.write(fd, parent_rev)
 		self.ui.tooltip("Reviewing differences for " + commitEvent.path)
 		self.ui.draw()
-		os.popen("%s '%s' '%s'" % (REVIEWTOOL, commitEvent.abspath(), path)).read()
+		mergetool.review(commitEvent.abspath(), path)
 		os.close(fd)
 		os.unlink(path)
 
@@ -406,7 +403,6 @@ def commit_wrapper(repo, files=None, text="", user=None, date=None,
 	if files:
 		raise Exception("Explicit files are not supported right now.")
 	else:
-		print "POUET", repo.status(match=match)
 		changed, added, removed, deleted, unknown, ignored, clean = repo.status(match=match)
 
 	# We create a commit object that sums up the information	

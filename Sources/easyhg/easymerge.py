@@ -404,8 +404,7 @@ class ConsoleUI(urwide.Handler):
 
 	def mergeInfo( self ):
 		"""Returns a user-friendly descirption of the merge"""
-		cur, oth, par = self.conflictsInfo()
-		print cur, oth, par
+		cur, par, oth = self.conflictsInfo()
 		return INFO_TEMPLATE % (
 			cur[0],  cur[2], cur[1],
 			oth[0],  oth[2], oth[1],
@@ -467,7 +466,7 @@ class ConsoleUI(urwide.Handler):
 	def onResolveConflict( self, conflict ):
 		"""Resolves the given conflict by popping up a dialog."""
 		# TODO: Get widget conflict
-		c, o, p = self.conflictsInfo()
+		c, p, o = self.conflictsInfo()
 		ui = DLG_RESOLVE % (
 			conflict.path(),
 			c[0], o[0],
