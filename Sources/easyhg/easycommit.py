@@ -7,7 +7,7 @@
 # Author    : Sébastien Pierre                           <sebastien@type-z.org>
 # -----------------------------------------------------------------------------
 # Creation  : 10-Jul-2006
-# Last mod  : 30-Jul-2007
+# Last mod  : 05-Sep-2007
 # -----------------------------------------------------------------------------
 
 import sys, os, re, time, stat, tempfile
@@ -458,22 +458,27 @@ def easy_commit( ui, repo, *args, **opts ):
 	"""This is the main function that is called by the 'hg' commands (actually
 	through the 'mercurial.commands.dispatch' function)."""
 	# Here we swap the default commit implementation with ours
-	repo_old_commit            = repo.__class__.commit
-	repo.__class__.commit      = commit_wrapper
-	repo.__class__._old_commit = repo_old_commit
+	commit_message = opts.get("message")
 	global USERNAME ; USERNAME = ui.username()
-	new_opts = {}
-	for key, value in opts.items(): new_opts[key] = value
-	# Sets the default commit options
-	for key, value in command_defaults(ui, "commit").items():
-		if not opts.has_key(key): opts[key] = value
-	# Restores the commit implementation
-	new_opts['cmdoptions'] = new_opts
-	# Invokes the 'normal' mercurial commit
-	mercurial.commands.commit(ui, repo, *args, **new_opts)
-	repo.__class__.commit  = repo_old_commit
-	del repo.__class__._old_commit
-
+	if not commit_message:
+		repo_old_commit            = repo.__class__.commit
+		repo.__class__.commit      = commit_wrapper
+		repo.__class__._old_commit = repo_old_commit
+		new_opts = {}
+		for key, value in opts.items(): new_opts[key] = value
+		# Sets the default commit options
+		for key, value in command_defaults(ui, "commit").items():
+			if not opts.has_key(key): opts[key] = value
+		# Restores the commit implementation
+		new_opts['cmdoptions'] = new_opts
+		# Invokes the 'normal' mercurial commit
+		mercurial.commands.commit(ui, repo, *args, **new_opts)
+		repo.__class__.commit  = repo_old_commit
+		del repo.__class__._old_commit
+	else:
+		new_opts = opts
+		mercurial.commands.commit(ui, repo, *args, **new_opts)
+	
 # This may change in the different Mercurial version, maybe we should find a
 # better way of doing this.d
 COMMIT_COMMAND =  mercurial.commands.table["^commit|ci"]
