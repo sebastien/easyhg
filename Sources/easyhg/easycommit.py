@@ -37,7 +37,8 @@ consistency of commits.
 # CONSOLE INTERFACE
 #
 # ------------------------------------------------------------------------------
-DEFAULT_TAGS  = "Fix Feature Update Refactor Experiment Prototype Release Merge Branch Major Minor Experimental".split()
+DEFAULT_TAGS  = "Documentation Fix Feature Update Refactor Experiment \
+Prototype Release Merge Branch Major Minor Experimental WIP".split()
 CONSOLE_STYLE = """\
 Frame         : WH, DB, SO
 header        : WH, DC, BO
