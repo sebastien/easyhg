@@ -93,7 +93,6 @@ def detectMergeTool():
 			"No file merging utility. Please set the MERGETOOL variable\n"
 			+ HELP
 		)
-	MERGETOOL = FILEMERGE
 	return MERGETOOL
 
 def _format( line, *args ):
