@@ -8,7 +8,7 @@
 # Author    : Sébastien Pierre                           <sebastien@xprima.com>
 # -----------------------------------------------------------------------------
 # Creation  : 21-Jul-2006
-# Last mod  : 20-Jul-2007
+# Last mod  : 05-Oct-2007
 # -----------------------------------------------------------------------------
 
 import os, string, time, datetime, re, base64, pickle, types, sha, popen2
@@ -271,7 +271,19 @@ class Repository:
 
 	def isSSH( self ):
 		"""Tells if this repository is a remote repository, accessed through SSH"""
-		return isinstance(self._repo, mercurial.sshrepo.sshrepository)
+		# NOTE: Probably because mercurial does strange thing with Python
+		# imports, this gives me:
+		#  File "/Users/sebastien/Local/Python/easyhg/easyapi.py", line 276, in isSSH
+		#    return isinstance(self._repo, mercurial.sshrepo.sshrepository)
+		# AttributeError: 'module' object has no attribute 'sshrepo'
+		# return isinstance(self._repo, mercurial.sshrepo.sshrepository)
+		# So the hack is as follows
+		if not self._repo:
+			return False
+		if self._repo.__class__.__name__ == "sshrepository":
+			return True
+		else:
+			return False
 
 	# PERSISTENCE
 	# _________________________________________________________________________
