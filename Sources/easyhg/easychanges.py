@@ -40,6 +40,7 @@ def command_main( ui, repo, *args, **opts ):
 	path = args[0]
 	fd, temp_path = tempfile.mkstemp(prefix="hg-changes-")
 	rev = hg_lastmodrev(path)
+	print "FUCK"
 	os.write(fd, hg_cat(rev, path))
 	os.close(fd)
 	os.system("%s %s %s" % (MERGETOOL, path, temp_path))
