@@ -3,7 +3,7 @@
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
 <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1" />
-<title>Mercurial Easy Tools</title>
+<title>Mercurial-easy</title>
 <style><!-- 
 body {
 	margin-left: 10%;
@@ -11,17 +11,12 @@ body {
 	padding: 20pt;
 	padding-top: 10pt;
 	background: rgb(255,255,255);
-	font:  9pt/13pt "Lucida Grande",Lucida,sans-serif;
-	font:  9.5pt/12pt sans-serif;
+	font:  10.5pt/15pt "Helvetica",Helvetica,sans-serif;
 	color: rgb(80,80,80);
 }
 
-table tr td {
-	font:  8pt/12pt "Lucida Grande",Lucida,sans-serif;
-}
-
 h1, h2, h3, h4 {
-	font-family: "Trebuchet MS",sans-serif;
+	font-family: "Trebuchet MS",Helvetica,sans-serif;
 	color: rgb(22, 130, 178);
 	font-weight: normal;
 	padding-top: 0.5em;
@@ -66,7 +61,7 @@ aimg {
 	color: rgb(177,208,223);
 }
 
-#content {
+.kiwiContent {
 	text-align: left;
 }
 
@@ -82,81 +77,110 @@ aimg {
 	margin-bottom: 0;
 }
 
-#meta {
-	width: 100%;
+.kiwiMeta {
+	max-width: 700px;
 	padding: 5pt;
 	margin-bottom:  2em;
 	border-top:  1px solid rgb(150, 220, 238);
 	background-color: rgb(250,250,250);
 }
 
-#meta tr td {
+.kiwiMeta tr td {
 	color: rgb(22, 130, 178);
 }
 
-#meta tr td.name {
+.kiwiMeta tr td.name {
 	font-weight: bold;
 }
 
-#content h1, #content h2{
-	padding-bottom: 5pt;
+.kiwiContent {
+	max-width: 700px;
+}
+
+.kiwiContent .heading .number {
+	padding-right: 8pt;
+}
+
+.kiwiContent .heading .number .lastDot {
+	display: none;
+}
+
+
+.kiwiContent .heading .number .level0 .lastDot {
+	display: inline;
+}
+
+.kiwiContent h1 {
+	font-size: 1.8em;
+	font-weight: bold;
+	margin-top: 1.5em;
+	padding-bottom: 0.5em;
 	border-bottom:  1px dotted rgb(150, 220, 238);
 }
 
-#content h1 {
-	font-size: 1.5em;
-	font-weight: normal;
-	padding-top: 1.5em;
+.kiwiContent h2 {
+	font-size: 1.4em;
+	font-weight: bold;
 	padding-bottom: 0.5em;
+	border-bottom:  1px dotted rgb(150, 220, 238);
 }
 
-#content h2 {
-	font-size: 1.3em;
+.kiwiContent h3 {
+	font-size: 1.2em;
+	font-weight: normal;
 }
 
-#content h3 {
-	font-size: 1.1em;
-}
-
-#content pre {
+.kiwiContent pre {
 	padding: 5pt;
-	border-left:  1px solid rgb(150, 220, 238);
+	border:  1px solid rgb(150, 220, 238);
 	padding-left: 20pt;
-	background-color: rgb(250,250,250);
-	font-size: 80%;
+	background-color: rgb(240,240,250);
+	font-size: 8pt;
 	color: rgb(22,130,178);
 }
 
-#content code {
-	font-size: 80%;
-	color: rgb(143, 160, 168);
+.kiwiContent code {
+	font-size: 8pt;
+	background-color: rgb(240,240,250);
 }
 
-#content dt {
+.kiwiContent dt {
 	color: rgb(22,130,178);
 	font-weight: bold;
 }
 
-#content dd {
+.kiwiContent dd {
 	border-left:  1px solid rgb(150, 220, 238);
 	padding-left: 20pt;
 	margin-bottom: 2em;
 }
 
-#content dd pre {
-	border-left: 0px;
+.kiwiContent dd pre {
 }
 
-#content ul li {
-	padding-bottom: 0.5em;
+.kiwiContent ul {
+	padding-top: 0em;
+	margin-top: 0em;
 }
 
-#content table {
+.kiwiContent ul li {
+	padding-bottom: 0.2em;
+}
+
+.kiwiContent ul li.todo {
+	list-style-type: square;
+}
+
+.kiwiContent ul li.todo.done {
+	text-decoration: line-through;
+}
+
+.kiwiContent table {
 	border:  1px solid rgb(150, 220, 238);
-	padding: 5pt;
+	padding: 0pt;
 }
 
-#content table caption {
+.kiwiContent table caption {
 	font-family: serif;
 	padding-top: 1em;
 	padding-bottom: 0.5em;
@@ -165,93 +189,107 @@ aimg {
 	color: rgb(22, 130, 178);
 }
 
-#content table tbody {
+.kiwiContent table tbody {
 }
 
-#content table tr {
+.kiwiContent table tr {
 	margin: 0;
 }
 
-#content table tr td {
+.kiwiContent table tr td {
 	margin: 0;
-	padding: 0px;
-	padding-right: 5pt;
+	padding: 5pt;
+	font-size: 90%;
+	min-width: 125px;
 	background-color: rgb(250,250,250);
+	border-bottom: 1px solid rgb(150, 220, 238);
 }
 
-#content table tr.odd td {
+.kiwiContent table tr td.lastRow {
+	border-bottom: none;
+}
+
+.kiwiContent table tr td.lastCol {
+	border-right: none;
+}
+
+.kiwiContent table tr.even td {
+	background-color: #FEFEFE;
+
+}
+
+.kiwiContent table tr.odd td {
 	background-color: rgb(240,240,240);
 }
 
-#content .term {
+.kiwiContent .term {
 	color: rgb(22, 130, 178);
 	background: rgb(240, 250, 256);
 }
 
-#content .quote {
+.kiwiContent .quote {
 	font-style: italic;
 	color: rgb(120, 120, 120);
 }
 
-#content .citation {
+.kiwiContent .citation {
 	font-style: italic;
 	color: rgb(120, 120, 120);
 }
 
-#content div[class^="ann"] {
+.kiwiContent div[class^="ann"] {
 	margin-top: 5pt;
 	margin-bottom: 5pt;
 	padding: 5pt;
 	padding-left: 20pt;
 	color: rgb(100, 100, 100);
-	font-size: 0.8em;
 }
 
-#content div[class^="ann"] .title {
+.kiwiContent div[class^="ann"] .title {
 	font-weight: bold;
 }
 
-#content .annNote {
-	border-left:  1px solid rgb(103,183,0);
+.kiwiContent .annNote {
+	border:  1px solid rgb(103,183,0);
 	margin-top: 5pt;
 	margin-bottom: 5pt;
 	padding: 5pt;
 	padding-left: 20pt;
 	background: #fffbe4;
 	color: rgb(100, 100, 100);
-	font-size: 0.8em;
+	border:  1px solid #dedac3;
 }
 
-#content .annNote .title {
+.kiwiContent .annNote .title {
 	font-weight: bold;
 	display: none;
 }
 
-#references {
+.kiwiReferences {
 	font:  8pt/12pt "Lucida Grande",Lucida,sans-serif;
 	margin-top: 10pt;
 	padding: 5pt;
-	border-top:  1px solid rgb(150, 220, 238);
+	border-top:  1px solid rgb(200, 200, 200);
 	background-color: rgb(250,250,250);
 	color: rgb(200, 200, 200);
 	font-size: 8pt;
 }
-#references a:link, #references a:active, #references a:visited {
+.kiwiReferences a:link, .kiwiReferences a:active, .kiwiReferences a:visited {
 	color: rgb(150,150,150);
 }
 
-#references .entry {
+.kiwiReferences .entry {
 	padding-top: 5pt;
 	clear: both;
 }
 
-#references .entry .name {
+.kiwiReferences .entry .name {
 	float: left;
 	font-weight: bold;
 	padding-right: 5pt;
 }
 
-#references .entry .content {
+.kiwiReferences .entry .content {
 	text-align: right;
 }
 
@@ -259,16 +297,12 @@ aimg {
 </head>
 <body>
 <div
-	class="title"><h1>Mercurial Easy Tools</h1><h2>Friendly Extensions To Make Users Happy</h2></div><table id='meta'><tr><td width='0px' class='name'>Author</td><td width='100%' class='value'>Sébastien Pierre &lt;sebastien@xprima.com&gt;</td></tr><tr><td width='0px' class='name'>Version</td><td width='100%' class='value'>1.0</td></tr></table>
-<div class='content'><p><a href="http://www.selenic.com/mercurial">Mercurial</a> is an easy to use, versatile, distributed revision control system written in the Python language. The distributed nature of Mercurial makes it well-suited for open source development, but sometimes less easy than other RCS when used in a centralized style.</p><p>The setup we use at XPrima is as follows:</p><ul><li>All projects are hosted on a single Linux file server, accessible through Samba and SSH. </li><li>Developers have their workspace on the same file server. </li><li>Developers work either on Win32 or Linux.</li></ul><p>In particular:</p><ul><li>We have a <code>Projects</code> directory with all projects (in development or retired) </li><li>We have a <code>Home</code> directory with all developer workspaces (where projects are checked out).</li></ul><p>The purpose of the <span class='term'>XPrima Mercurial Extensions</span> is to fulfill the following requirements :</p><ul><li>Add the notion of <span class='term'>central</span> and <span class='term'>developer</span> repositories </li><li>Add per-project meta-information such as description and list of developers </li><li>Allow per-project locking of files or directories </li><li>Provide tools to ease the resolution of conflicts (when merging) </li><li>Provide tools to ensure rich, structured commits </li><li>Provide tools to give developers and managers an overview of the development process</li></ul><p>In this respect, we offer the following tools:</p><ul><li><span class='term'>Easychanges</span>, which eases the browsing of changes in the current repository </li><li><span class='term'>Easycommit</span>, which eases the writing of richer commit messages </li><li><span class='term'>Easymerge</span>, which makes merging easier by providing additional functionalities </li><li><span class='term'>Project</span>, which adds per-project meta-information and the ability to define central and "development" repositories.</li></ul><div class="section"><h1 class="heading">Mercurial Easychanges</h1><div class="level1"><p>TODO</p></div></div><div class="section"><h1 class="heading">Mercurial Easycommit</h1><div class="level1"><p>TODO</p></div></div><div class="section"><h1 class="heading">Mercurial Easymerge</h1><div class="level1"><p>The <a href="http://www.selenic.com/mercurial">Mercurial</a> version control system has a default method of merging conflicts that has some limitations:</p><ul><li>Conflicts must be resolved by the user in an arbitrary order </li><li>It is not possible to resolve a conflict in multiple, interrupted steps </li><li>It is not easy to get access to the different revisions in conflict</li></ul><p>The purpose of the Mercurial <span class='term'>Easymerge</span> tool is simply to help developers resolve conflicts that may occur within a merge :</p><ul><li>Conflicts are attributed a number, and can be resolved in any order </li><li>Conflict resolution can be undone if necessary </li><li>Resolution process can be stopped and resumed at will </li><li>All available revisions for a conflict are made available on the filesystem</li></ul><p><span class='term'>Easymerge</span> is available as a <code>hg-easymerge</code> command line utility, which has to be installed by adding the following line in your <code>~/.hgrc</code>:</p><pre>merge = hg-easymerge</pre><p>This enables <span class='term'>Easymerge</span> to be invoked whenever you use the <code>hg merge</code> command.</p><div class="section"><h2 class="heading">Usage</h2><div class="level2"><p>Easymerge is automatically started when you do a <code>merge</code> with Mercurial. It will automatically populate your working directory with <code>.current</code>, <code>.other</code> and <code>.original</code> versions of each file where there is a conflict. You should not edit these files</p><div class="section"><h3 class="heading">Listing conflicts</h3><div class="level3"><pre>hg-easymerge list</pre></div></div><div class="section"><h3 class="heading">Resolving a conflict</h3><div class="level3"><pre>hg-easymerge resolve 0</pre><pre>hg-easymerge resolve 0 merge</pre><pre>hg-easymerge resolve 0 keep</pre><pre>hg-easymerge resolve 0 update</pre><pre>hg-easymerge resolve 5 9 2</pre></div></div><div class="section"><h3 class="heading">Undoing a resolution</h3><div class="level3"><pre>hg-easymerge undo 0</pre></div></div><div class="section"><h3 class="heading">Commiting the changes</h3><div class="level3"><pre>hg-easymerge commit</pre></div></div><div class="section"><h3 class="heading">Cleaning up</h3><div class="level3"><pre>hg-easymerge clean</pre></div></div></div></div></div></div><div class="section"><h1 class="heading">Mercurial Easyproject</h1><div class="level1"><p>Mercurial can be used in a <span class='term'>centralized</span> style, where there is a single location for the "main" (central) project repositories, and where each individual developer maintain its changes in a local repository, where it pushes and pull to the central repository.</p><pre>                      &lt;----------- clone ----------- 
- [WORKING REPOSITORY] &lt;----------- pull  ----------- [CENTRAL REPOSITORY]
-       (many)         ------------ push  ----------&gt;        (one)</pre><p>In this case, it is useful to explicitly create a link between the working repository and the central repository, and to provide tools to easily check the state between both.</p><div class="section"><h2 class="heading">Features</h2><div class="level2"><p>The Mercurial project extension adds support for describing projects in such environments:</p><ul><li>A project can be named and described </li><li>A project has a number of owners, responsible for the central repository, and a number of developers, having their own "branches" </li><li>A working repository for a project inherits the information from the central repository it is bound to.</li></ul><p>The main purpose of the project extension is to have an easy summary of the project status:</p><pre>hg project
-Name        : GuestPW (working)
-Description : Time-based Apache 1.3 authentication module
-Path        : /home/sebastien/Workspace/GuestPassword
-Parent      : /home/sebastien/Network/Home/Projects/guestpw
-Owner       : sebastien@xprima.com
-Developer   : sebastien@xprima.com</pre><p>Gives you information on the current project (wether development or central repository), by qualifying the state of the development repository or repositories compared to the central repository:</p><table cellpadding="0" cellspacing="0" align="center"><caption>Relative state of repositories</caption><tbody><tr class='even'><td>Central state<br /></td><td>Development state<br /></td><td>Central qualifier<br /></td><td>Dev qualifier<br /></td></tr><tr class='odd'><td>R50<br /></td><td>R50<br /></td><td></td><td>up to date<br /></td></tr><tr class='even'><td>R51<br /></td><td>R50<br /></td><td></td><td>out of date<br /></td></tr><tr class='odd'><td>R50<br /></td><td>R51<br /></td><td>incoming change<br /></td><td>outgoing change<br /></td></tr><tr class='even'><td>R50<br /></td><td>R50 (alt)<br /></td><td>incoming branch<br /></td><td>outgoing branch<br /></td></tr><tr class='odd'><td>local changes<br /></td><td></td><td>changed<br /></td><td>central changed<br /></td></tr><tr class='even'><td></td><td>local changes<br /></td><td>in development<br /></td><td>in development<br /></td></tr></tbody></table></div></div><div class="section"><h2 class="heading">Additional .hgrc properties</h2><div class="level2"><p>Some properties were added to the <code>.hg/hgrc</code> file, which are all contained within the <code>[project]</code> section.</p><table cellpadding="0" cellspacing="0" align="center"><caption>Project extension properties</caption><tbody><tr class='even'><td>Property<br /></td><td>Type<br /></td><td>Description<br /></td></tr><tr class='odd'><td>name<br /></td><td>central<br /></td><td>project name<br /></td></tr><tr class='even'><td>description<br /></td><td>central<br /></td><td>project description<br /></td></tr><tr class='odd'><td>owner(s)<br /></td><td>central<br /></td><td>name and email of project owners. Owners are responsible for ensuring the quality of the project.<br /></td></tr><tr class='even'><td>developers(s)<br /></td><td>central<br /></td><td>name and email of people who contributed to the project.<br /></td></tr><tr class='odd'><td>parent<br /></td><td>development<br /></td><td>the path to the parent central directory<br /></td></tr></tbody></table></div></div></div></div></div>
+	class="title"><h1>Mercurial-easy</h1><h2>Mercurial Becomes Even More Friendly !</h2></div>
+<div class="kiwiContent"><div class='content'><div class="section" level="1"><h1 class="heading"><span class="number"><span class="level0">1<span class="lastDot dot">.</span></span></span>How to install ?</h1><div class="level1"><pre> python setup.py install</pre><p>or</p><pre> python setup.py intall --prefix=~/where/you/want</pre><p>You will then have the following modules installed:</p><ul><li><code>easyhg</code> the Mercurial-Easy project </li><li><code>urwid</code> a library required by Mercurial-Easy </li><li><code>urwide</code> another library also required by Mercurial-Easy </li><li><code>easymerge.py</code> which is a script that you should use when mergeing</li></ul><p>To know where Mercurial-Easy is installed, simply do:</p><pre>python -c 'import os,easyhg;print os.path.dirname(os.path.abspath(easyhg.__file__))'</pre><p>For me it will tell you that it is installed here:</p><pre>/Users/sebastien/Local/lib/python2.5/site-packages/easyhg</pre><p>You can now edit your <code>~/.hgrc</code> file:</p><pre>[extensions]
+# Mercurial-Easy tools
+commit    = ~/Projects/Mercurial-Easy/Sources/easyhg/easycommit.py
+changes   = ~/Projects/Mercurial-Easy/Sources/easyhg/easychanges.py
+project   = ~/Projects/Mercurial-Easy/Sources/easyhg/easyproject.py</pre><p>And you can disable any of these, of course !</p></div></div></div></div>
 
 </body>
 </html>

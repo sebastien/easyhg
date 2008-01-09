@@ -11,9 +11,8 @@
 # -----------------------------------------------------------------------------
 
 import sys, os, re, time, stat, tempfile
-import urwide, urwid
 import easyhg.mergetool as mergetool
-
+import urwide, urwid
 from mercurial.i18n import gettext as _
 import mercurial
 import mercurial.commands

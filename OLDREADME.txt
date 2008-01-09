@@ -9,43 +9,31 @@ distributed nature of Mercurial makes it well-suited for open source
 development, but sometimes less easy than other RCS when used in a centralized
 style.
 
-The setup we use at XPrima is as follows:
+The purpose of the _Easy Mercurial_ tools is (surprisingly) to make
+the developer's life easier. In particular, we provide tools to ease the
+following tasks:
 
- - All projects are hosted on a single Linux file server, accessible through
-   Samba and SSH.
- - Developers have their workspace on the same file server.
- - Developers work either on Win32 or Linux.
+ Commiting::
+   We allow to commit only a subset of the changed files (a la 'record') and
+   to qualify the commit (is it a fix, a new feature, documentation, etc), view
+   the changes, etc.
+ 
+ Merging::
+    We make merging easier and more interactive by allowing to interactively
+    take decision for each conflict and review the changes in place.
 
-In particular:
+ Processing::
+    Mercurial API has changed many times since 0.9.0 and maintaining extensions
+    and custom scripts can be painful. We provide an API that wraps the command
+    line interface, works equally good for local and remote repositories and
+    won't change. It's also OO.
+	
+As a result, we provide the following tools:
 
- - We have a `Projects` directory with all projects (in development or retired)
- - We have a `Home` directory with all developer workspaces (where projects are
-   checked out).
-
-The purpose of the _XPrima Mercurial Extensions_ is to fulfill the following
-requirements :
-
- - Add the notion of _central_ and _developer_ repositories
- - Add per-project meta-information such as description and list of developers
- - Allow per-project locking of files or directories
- - Provide tools to ease the resolution of conflicts (when merging)
- - Provide tools to ensure rich, structured commits
- - Provide tools to give developers and managers an overview of the development
-   process
-
-In this respect, we offer the following tools:
-
- - _Easychanges_, which eases the browsing of changes in the current repository
- - _Easycommit_, which eases the writing of richer commit messages
- - _Easymerge_, which makes merging easier by providing additional
+ - _Easy commit_, which allows interactive commiting
+ - _Easy merge_, which allows to merge interactively
    functionalities
- - _Project_, which adds per-project meta-information and the ability to define
-   central and "development" repositories.
-
-Mercurial Easychanges
-====================
-
-    TODO
+ - _Easy API_, which offers an OO API that works well for local and remote repos
 
 Mercurial Easycommit
 ====================
@@ -55,8 +43,8 @@ Mercurial Easycommit
 Mercurial Easymerge
 ===================
 
-    The [Mercurial](http://www.selenic.com/mercurial) version control system has a
-    default method of merging conflicts that has some limitations:
+    The [Mercurial](http://www.selenic.com/mercurial) version control system has
+    a default method of merging conflicts that has some limitations:
 
      - Conflicts must be resolved by the user in an arbitrary order
      - It is not possible to resolve a conflict in multiple, interrupted steps
