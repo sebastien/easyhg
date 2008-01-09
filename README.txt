@@ -1,5 +1,5 @@
 == Mercurial-Easy
-== Mercurial becomes even more friendly !
+== UI love for Hg
 
 
 What is it ?
@@ -33,7 +33,7 @@ How to install ?
 ================
 
 First you should get the [latest
-tarball](http://www.ivy.fr/mercurial/easy/mercurial-easy-latest.tgz) if you
+tarball](http://www.ivy.fr/mercurial/easy/mercurial-easy-latest.tar.gz) if you
 don't alrady have it. Of course you need [Python](http://www.python.org) and
 [Mercurial](http://www.selenic.com/mercurial) too (but we don't support 0.9.5
 yet).
