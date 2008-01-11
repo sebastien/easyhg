@@ -63,6 +63,9 @@ For me it will tell you that it is installed here:
 
 You can now edit your '~/.hgrc' file:
 
+>	[ui]
+>	mergetool = ~/Projects/Mercurial-Easy/Sources/easyhg/easymerge.py
+>	
 >	[extensions]
 >	# Mercurial-Easy tools
 >	commit    = ~/Projects/Mercurial-Easy/Sources/easyhg/easycommit.py
