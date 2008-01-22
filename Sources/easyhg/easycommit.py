@@ -7,7 +7,7 @@
 # Author    : Sébastien Pierre                           <sebastien@type-z.org>
 # -----------------------------------------------------------------------------
 # Creation  : 10-Jul-2006
-# Last mod  : 05-Sep-2007
+# Last mod  : 22-Jan-2007
 # -----------------------------------------------------------------------------
 
 import sys, os, re, time, stat, tempfile
@@ -359,14 +359,17 @@ class AddEvent( Event ):
 	def info( self ):
 		"""Returns the diffstat information"""
 		if self._cache_info: return self._cache_info
-		st = os.stat(self.abspath())
-		st_size  = float(st[stat.ST_SIZE]) / 1024
-		st_mtime = time.ctime(st[stat.ST_MTIME])
-		info = " %s\n %skb, last modified %s" % (
-			os.path.basename(self.path),
-			st_size,
-			st_mtime
-		)
+		if os.path.isfile(self.abspath()):
+			st = os.stat(self.abspath())
+			st_size  = float(st[stat.ST_SIZE]) / 1024
+			st_mtime = time.ctime(st[stat.ST_MTIME])
+			info = " %s\n %skb, last modified %s" % (
+				os.path.basename(self.path),
+				st_size,
+				st_mtime
+			)
+		else:
+			info = " Symbolic link to: " + os.popen("readlink '%s'" % (self.abspath())).read()
 		self._cache_info = info
 		return self._cache_info
 
