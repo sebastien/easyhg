@@ -1,0 +1,22 @@
+Traceback (most recent call last):
+  File "/Users/sebastien/Local/bin/easymerge", line 1221, in <module>
+    sys.exit(run(sys.argv[1:]))
+  File "/Users/sebastien/Local/bin/easymerge", line 1166, in run
+    ops  = Operations(Conflicts(root))
+  File "/Users/sebastien/Local/bin/easymerge", line 753, in __init__
+    self.load()
+  File "/Users/sebastien/Local/bin/easymerge", line 777, in load
+    ci, oi, pi = hg_get_merge_revisions(os.path.dirname(self._path))
+ValueError: need more than 1 value to unpack
+#
+Registering conflict
+Traceback (most recent call last):
+  File "/Users/sebastien/Projects/Mercurial-Easy/Sources/easyhg/easymerge.py", line 1221, in <module>
+    sys.exit(run(sys.argv[1:]))
+  File "/Users/sebastien/Projects/Mercurial-Easy/Sources/easyhg/easymerge.py", line 1189, in run
+    cnf  = Conflicts(root)
+  File "/Users/sebastien/Projects/Mercurial-Easy/Sources/easyhg/easymerge.py", line 753, in __init__
+    self.load()
+  File "/Users/sebastien/Projects/Mercurial-Easy/Sources/easyhg/easymerge.py", line 777, in load
+    ci, oi, pi = hg_get_merge_revisions(os.path.dirname(self._path))
+ValueError: need more than 1 value to unpack
