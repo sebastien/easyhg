@@ -1,6 +1,5 @@
 #!/usr/bin/python
-# Encoding: iso-8859-1
-# vim: tw=80 ts=4 sw=4 fenc=latin-1 noet
+# Encoding: utf8
 # -----------------------------------------------------------------------------
 # Project   : Mercurial - Easy tools
 # License   : GNU Public License         <http://www.gnu.org/licenses/gpl.html>
@@ -19,7 +18,7 @@ except:
 	sys.exit(-1)
 
 try:
-	from easyhg.easyapi import Repository, expand_path
+	from hg.api import Repository, expand_path
 except:
 	print "Failed to load Mercurial-Easy modules."
 	sys.exit(-1)
@@ -51,8 +50,8 @@ def Repository_load( repo, ui=None ):
 	return repo
 
 class ProjectRepository(Repository):
-	"""This specific repository subclass offers an easy way to manipulate
-	additional project meta-information managed by the easyproject extension."""
+	"""This specific repository subclass offers an  way to manipulate
+	additional project meta-information managed by the project extension."""
 
 	CENTRAL     = "central"
 	DEVELOPMENT = "development"
@@ -281,7 +280,7 @@ class DevelopmentRepository(ProjectRepository):
 HELP = """\
 project [info|status|parent|children|clone|help]
 
-   The project command allows easy management of Mercurial repositories in a
+   The project command allows  management of Mercurial repositories in a
    centralized or semi-centralized style, where there is a notion of "central"
    repository, and a set of "development" repositories link to this repository.
 
@@ -305,7 +304,7 @@ project info [property=value...]
     can be modified in the project configuration (.hg/hgrc, [project] section).
 
     Supported properties for Central repositories:
-    
+
         name          = a string with the project name
         description   = a string with the project description
         owner(s)      = comma-separated list of name <email> for project owners
@@ -488,4 +487,4 @@ commands = Commands()
 cmdtable = {
 	"project": ( commands.main, [], 'hg project info|clone|parent' )
 }
-# EOF
+# EOF - vim: tw=80 ts=4 sw=4 fenc=latin-1 noet

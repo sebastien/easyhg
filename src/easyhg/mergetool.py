@@ -1,6 +1,5 @@
 #!/usr/bin/env python
-# Encoding: iso-8859-1
-# vim: tw=80 ts=4 sw=4 noet
+#encoding: utf8
 # -----------------------------------------------------------------------------
 # Project   : Mercurial - Easy tools
 # License   : GNU Public License         <http://www.gnu.org/licenses/gpl.html>
@@ -11,7 +10,7 @@
 # Last mod  : 27-Jul-2007
 # -----------------------------------------------------------------------------
 
-# TODO: Add async support 
+# TODO: Add async support
 
 import os, popen2
 MERGETOOL = None
@@ -47,7 +46,7 @@ FILEMERGE = {
 GVIMDIFF = {
 	"APP"     : "gvimdiff",
 
-	"REVIEW"  : "$0 '$1' '$2'  " 
+	"REVIEW"  : "$0 '$1' '$2'  "
 	,
 
 	"REVIEW3"   : "$0 -f '$1' '$2' '$3' " \
@@ -121,4 +120,4 @@ def merge( destination, current, other ):
 def merge3( destination, current, other, base ):
 	return _do("merge3", destination, current, other, base)
 
-# EOF
+# EOF - vim: tw=80 ts=4 sw=4 noet

@@ -1,18 +1,17 @@
 #!/usr/bin/python
-# Encoding: iso-8859-1
-# vim: tw=80 ts=4 sw=4 fenc=latin-1 noet
+# Encoding: utf8
 # -----------------------------------------------------------------------------
 # Project   : Mercurial - Easy tools
 # License   : GNU Public License         <http://www.gnu.org/licenses/gpl.html>
 # -----------------------------------------------------------------------------
-# Author    : Sébastien Pierre                           <sebastien@xprima.com>
+# Author    : SÃ©bastien Pierre                           <sebastien@xprima.com>
 # -----------------------------------------------------------------------------
 # Creation  : 21-Jul-2006
 # Last mod  : 05-Oct-2007
 # -----------------------------------------------------------------------------
 
 import os, string, time, datetime, re, base64, pickle, types, sha, popen2
-import mercurial.ui, mercurial.hg, mercurial.localrepo, mercurial.sshrepo
+import mercurial.ui, mercurial.hg, mercurial.localrepo, mercurial.sshrepo, mercurial.scmutil
 
 # TODO: Completely remove dependency on Mercurial
 # TODO: Create Repository Factory
@@ -30,8 +29,8 @@ The EasyAPI gives you the following advantages:
  - All operations work with local and remote (SSH) repositories
  - Repository information can be cached (pickled) and restored later
  - Complex queries can be easily done on the repo information
- - Configuration manipulation is made very easy
- - There is a nice, well-documented, easy to use OO API
+ - Configuration manipulation is made very
+ - There is a nice, well-documented,  to use OO API
 
 EasyAPI can be very useful to anybody willing to implement extensions or
 front-ends to Mercurial, as it abstracts from the mercurial API. EasyAPI uses
@@ -63,7 +62,7 @@ class Configuration:
 
 	def __init__( self, repo=None ):
 		"""Creaes a new configuration, which may use the given repostitory (must
-		be an easyapi repository)."""
+		be an api repository)."""
 		self._currentSection = None
 		self._lines          = []
 		self._sections       = [("",[])]
@@ -175,11 +174,11 @@ class Configuration:
 		return self._repo.readConfiguration()
 
 	def save( self ):
-		"""Saves the configruation to the repository.""" 
+		"""Saves the configruation to the repository."""
 		return self._repo.writeConfiguration(self.asString())
 
 def expand_path( path ):
-	"""Expands env variables and ~ symbol into the given path, and makes it
+	"""Expands env variables and ~Â symbol into the given path, and makes it
 	absolute."""
 	path = os.path.expanduser(path)
 	path = string.Template(path).substitute(os.environ)
@@ -237,13 +236,14 @@ class Repository:
 		# We have to use this trick to make sure the UI configuration is loaded
 		# from the repository path, and not from the current location
 		else:
-			oldrc_path = mercurial.ui.util._rcpath 
+			oldrc_path = mercurial.scmutil.rcpath()
 			p = path or repo.path
 			if p.endswith("hgrc"): pass
 			elif p.endswith(".hg"): p = os.path.join(p, "hgrc")
 			else: p = os.path.join(p, ".hg", "hgrc")
 			mercurial.ui.util._rcpath = p
-			self._ui   = mercurial.ui.ui(quiet=True)
+			self._ui   = mercurial.ui.ui()
+			self._ui.quiet = True
 			mercurial.ui.util._rcpath = oldrc_path
 		# And then the repository
 		if repo:
@@ -273,7 +273,7 @@ class Repository:
 		"""Tells if this repository is a remote repository, accessed through SSH"""
 		# NOTE: Probably because mercurial does strange thing with Python
 		# imports, this gives me:
-		#  File "/Users/sebastien/Local/Python/easyhg/easyapi.py", line 276, in isSSH
+		#  File "/Users/sebastien/Local/Python/hg/api.py", line 276, in isSSH
 		#    return isinstance(self._repo, mercurial.sshrepo.sshrepository)
 		# AttributeError: 'module' object has no attribute 'sshrepo'
 		# return isinstance(self._repo, mercurial.sshrepo.sshrepository)
@@ -296,7 +296,7 @@ class Repository:
 		f = file(path, "w")
 		pickle.dump(self, f)
 		f.close()
-	
+
 	@staticmethod
 	def restore( path ):
 		"""Restores the repository from the given location."""
@@ -308,8 +308,8 @@ class Repository:
 
 	def __getstate__( self ):
 		odict = self.__dict__.copy() # copy the dict since we change it
-		del odict['_repo'] 
-		del odict['_ui'] 
+		del odict['_repo']
+		del odict['_ui']
 		for name in odict.keys():
 			if type(odict[name]) == types.MethodType:
 				del odict[name]
@@ -339,7 +339,7 @@ class Repository:
 		if path.endswith(".hg"):  path = path[:-3]
 		if path.endswith("/"):    path = path[:-1]
 		return path
-	
+
 	def url(self):
 		if self.isSSH():
 			return self.hgrepo().url
@@ -383,7 +383,7 @@ class Repository:
 class ChangeSet:
 	"""This class represents a changeset. A changeset has the following
 	attributes:
-	
+
 	  -  @num
 	  -  @id
 	  -  @time
@@ -460,7 +460,7 @@ class Modification:
 		self.MODIFIED, self.NOTFOUND)
 		self.state = state
 		self.path  = path
-	
+
 	def __str__( self ):
 		return "%s %s" % (self.state, self.path)
 
@@ -477,7 +477,7 @@ class Tag:
 		self.name = name
 		self.id   = None
 		self.num  = None
-	
+
 	def __str__( self ):
 		return "%-31s%5d:%s" % (self.name, self.num, self.id)
 
@@ -492,7 +492,7 @@ class MercurialAPI:
 	methods that allow to access information on a Mercurial repository. It is
 	porvided as a convenient Object-Oriented wrapper around the Mercurial
 	commands.
-	
+
 	The API works well either locally or through an SSH connection."""
 
 	def __init__( self, repo ):
@@ -547,7 +547,7 @@ class MercurialAPI:
 	def tags( self ):
 		"""Returns tag name, rev and date for each tag within this repository."""
 		raise Exception("Not implemented")
-	
+
 	def readConfiguration( self ):
 		"""Reads the .hg/hgrc configuration file, and returns it as a string."""
 		raise Exception("Not implemented")
@@ -660,8 +660,8 @@ class MercurialLocal(MercurialAPI):
 
 	def __getstate__( self ):
 		odict = self.__dict__.copy() # copy the dict since we change it
-		del odict['_shin'] 
-		del odict['_shout'] 
+		del odict['_shin']
+		del odict['_shout']
 		return odict
 
 	# SSH INTERACTION
@@ -763,7 +763,7 @@ class MercurialLocal(MercurialAPI):
 	def writeConfiguration( self, text ):
 		cmd  = "echo '%s'" % (base64.b64encode(text))
 		cmd += "| python -c 'import sys, base64;print base64.b64decode(sys.stdin.read())'"
-		cmd += "> .hg/hgrc" 
+		cmd += "> .hg/hgrc"
 		self._doCommand(cmd)
 
 # ------------------------------------------------------------------------------
@@ -780,7 +780,7 @@ class MercurialSSH(MercurialLocal):
 
 	def __init__( self, repo ):
 		MercurialLocal.__init__(self, repo)
-	
+
 	def _sshParameters( self ):
 		# This returns the proper SSH arguments to for the repository location
 		hgrepo = self._repo.hgrepo()
@@ -791,4 +791,4 @@ class MercurialSSH(MercurialLocal):
 	def _startShell( self, shell="sh" ):
 		MercurialLocal._startShell(self, "ssh %s %s" % (self._sshParameters(), shell))
 
-# EOF
+# EOF - vim: tw=80 ts=4 sw=4 noet

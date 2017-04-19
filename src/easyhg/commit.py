@@ -1,22 +1,27 @@
 #!/usr/bin/env python
-# Encoding: iso-8859-1
+# Encoding: utf8
 # -----------------------------------------------------------------------------
 # Project   : Mercurial - Easycommit
 # License   : GNU Public License         <http://www.gnu.org/licenses/gpl.html>
 # -----------------------------------------------------------------------------
-# Author    : Sébastien Pierre                           <sebastien@type-z.org>
+# Author    : SÃ©bastien Pierre                           <sebastien@type-z.org>
 # -----------------------------------------------------------------------------
 # Creation  : 10-Jul-2006
-# Last mod  : 22-Jan-2007
+# Last mod  : 22-Jan-2017
 # -----------------------------------------------------------------------------
 
 import sys, os, re, time, stat, tempfile
 import easyhg.mergetool as mergetool
+from   copy import copy
 import urwide, urwid
-from mercurial.i18n import gettext as _
+from   mercurial.i18n import gettext as _
+from   mercurial.match import match
 import mercurial
 import mercurial.commands
 import mercurial.localrepo
+
+
+
 # FIX for 0.9.4 version of Mercurial
 try:
 	from mercurial import demandimport
@@ -24,7 +29,7 @@ try:
 except:
 	pass
 
-__version__ = "0.9.4"
+__version__ = "0.9.8"
 __doc__     = """\
 Easycommit is a tool that allows better, richer, more structured commits for
 Mercurial. It eases the life of the developers and enhances the quality and
@@ -36,8 +41,17 @@ consistency of commits.
 # CONSOLE INTERFACE
 #
 # ------------------------------------------------------------------------------
-DEFAULT_TAGS  = "Documentation Fix Feature Update Refactor Experiment \
-Prototype Release Merge Branch Major Minor Experimental WIP".split()
+DEFAULT_TAGS  = [
+	"Release",
+	"New",
+	"Update",
+	"Change",
+	"Feature",
+	"Refactor",
+	"Fix",
+	"WIP"
+]
+
 CONSOLE_STYLE = """\
 Frame         : WH, DB, SO
 header        : WH, DC, BO
@@ -65,8 +79,9 @@ CONSOLE_UI = """\
 Hdr MERCURIAL - Easycommit %s
 
 Edt Name          [$USERNAME]                   #edit_user
-Edt Summary       [One line commit summary]     #edit_summary ?SUMMARY &key=sumUp
 Edt Tags          [Update]                      #edit_tags    ?TAGS    &key=tag
+Edt Scope         [scope]                       #edit_scope   ?SCOPE   &key=scope
+Edt Summary       [One line commit summary]     #edit_summary ?SUMMARY &key=sumUp
 Dvd ___
 
 Box
@@ -74,7 +89,7 @@ Box
 End
 Dvd ___
 
-Ple                                              #changes 
+Ple                                              #changes
 End
 Dvd ___
 
@@ -86,7 +101,7 @@ End
 	""" % (__version__)
 
 class ConsoleUI:
-	"""Main user interface for easycommit."""
+	"""Main user interface for commit."""
 
 	def __init__(self):
 		self.ui = urwide.Console()
@@ -95,6 +110,7 @@ class ConsoleUI:
 		self.ui.strings.DESC    = "Describe your changes in detail here"
 		self.ui.strings.SUMMARY = "Give a one-line summary of your changes"
 		self.ui.strings.TAGS    = "Enter tags [+] and [-] to cycle through available tags"
+		self.ui.strings.SCOPE   = "Enter the scope of the the change"
 		self.ui.strings.CHANGE  = "[V]iew [C]ommit [S]ave [Q]uit"
 
 	def main( self, commit = None ):
@@ -110,14 +126,17 @@ class ConsoleUI:
 		return self.defaultHandler.selectedChanges()
 
 	def commitMessage( self ):
-		summ = self.ui.widgets.edit_summary.get_edit_text()
-		tags = self.ui.widgets.edit_tags.get_edit_text()
-		desc = self.ui.widgets.edit_desc.get_edit_text() 
-		if tags: tags = "\n%-12s %s" % ("tags:" , tags.lower())
-		msg = "%s\n\n%s%s" % (
-			summ,
-			desc,
+		summ  = self.ui.widgets.edit_summary.get_edit_text()
+		scope = self.ui.widgets.edit_scope.get_edit_text()
+		tags  = self.ui.widgets.edit_tags.get_edit_text()
+		desc  = self.ui.widgets.edit_desc.get_edit_text()
+		if tags:
+			tags = "".join("[{0}]".format(_.strip()) for _ in tags.split() if _.strip)
+		msg = "{0}{1}{2}\n\n{3}".format(
 			tags,
+			scope,
+			summ,
+			desc
 		)
 		while msg.find("\n\n") != -1: msg = msg.replace("\n\n", "\n")
 		return msg
@@ -140,11 +159,14 @@ class ConsoleUIHandler(urwide.Handler):
 		self.ui.end()
 
 	def onSumUp( self, widget, key ):
-		if hasattr(widget, "_alreadyEdited"): return False
+		if hasattr(widget, "_summaryEdited"): return False
 		if key in ("left", "right", "up", "down", "tab", "shift tab"): return False
 		widget.set_edit_text("")
 		widget._alreadyEdited = True
 		return False
+
+	def onScope( self, widget, key ):
+		return self.onSumUp(widget, key)
 
 	def isTag( self, tagname ):
 		"""Tells wether the given @tagname (as text) is a tag from the
@@ -199,6 +221,14 @@ class ConsoleUIHandler(urwide.Handler):
 		else:
 			return False
 
+	def onScope( self, widget, key ):
+		if key in ("left", "right", "up", "down", "tab", "shift tab"):
+			return False
+		if not hasattr(widget, "_alreadyEdited"):
+			widget.set_edit_text("")
+			widget._alreadyEdited = True
+		return False
+
 	def onDescribe( self, widget, key ):
 		if key in ("left", "right", "up", "down", "tab", "shift tab"):
 			return False
@@ -233,20 +263,20 @@ class ConsoleUIHandler(urwide.Handler):
 		commit = self.ui.data.commit
 		# Cleans up the existing widgets
 		changes = self.ui.widgets.changes
-		changes.remove_widgets()
+		urwide.remove_widgets(changes)
 		widgets = []
 		# Iterates on evnets and registers checkboxes
 		for event in commit.events:
 			checkbox = self.ui.new(urwid.CheckBox, "%-10s %s" %(event.name, event.path), True)
 			self.ui.unwrap(checkbox).commitEvent = event
-			changes.add_widget(self.ui.wrap(checkbox, "?CHANGE &focus=changeInfo"))
+			urwide.add_widget(changes, self.ui.wrap(checkbox, "?CHANGE &focus=changeInfo"))
 			self.ui.onFocus(checkbox, "changeInfo")
 			self.ui.onKey(checkbox, "change")
 		self.ui.widgets.changes.set_focus(0)
 
 	def reviewFile( self, commitEvent ):
 		parent_rev = commitEvent.parentRevision()
-		fd, path   = tempfile.mkstemp(prefix="hg-easycommit")
+		fd, path   = tempfile.mkstemp(prefix="hg-commit")
 		if not parent_rev: parent_rev = ""
 		os.write(fd, parent_rev)
 		self.ui.tooltip("Reviewing differences for " + commitEvent.path)
@@ -387,9 +417,7 @@ class RemoveEvent( Event ):
 
 USERNAME = None
 
-def commit_wrapper(repo, files=None, text="", user=None, date=None,
-    	match=mercurial.util.always, force=False, lock=None, wlock=None,
-    	force_editor=False,cmdoptions=None):
+def commit_wrapper(repo, message, user, date, match, **kwargs):
 	"""Replacement for the localrepository commit that intercepts the list of
 	changes. This function takes care of firing the """
 
@@ -398,48 +426,40 @@ def commit_wrapper(repo, files=None, text="", user=None, date=None,
 
 	# The following is adapted from localrepo.py (commit function)
 	# References are mercurial.commands.commit and localrepo.commit
-
 	added     = []
 	removed   = []
 	deleted   = []
 	changed   = []
-	if files:
-		raise Exception("Explicit files are not supported right now.")
-	else:
-		changed, added, removed, deleted, unknown, ignored, clean = repo.status(match=match)
 
-	# We create a commit object that sums up the information	
+	if not match:
+		match = mercurial.localrepo.always(repo.root, '')
 
+	changed, added, removed, deleted, unknown, ignored, clean = repo.status(match=match)
+
+	# We create a commit object that sums up the information
 	commit_object = Commit(repo)
 	for c in changed: commit_object.events.append(ChangeEvent(commit_object, c))
 	for c in added:   commit_object.events.append(AddEvent(commit_object, c))
 	for c in removed: commit_object.events.append(RemoveEvent(commit_object, c))
-	if commit_object.events:
-		# And we invoke the commit editor
-		app = ConsoleUI()
-		app.ui.strings.USERNAME = USERNAME
-		res = app.main(commit_object)
-		if not res:
-			print "Nothing was commited"
-			return
-		files = map(lambda c:c.path, app.selectedChanges())
-		# Now we execute the old commit method
-		if files:
-			# This is the old commit prototype
-			# def commit(self, files=None, text="", user=None, date=None,
-			#			 match=util.always, force=False, lock=None,
-			#			 wlock=None,
-			#			 force_editor=False, p1=None, p2=None,
-			#			 extra={}):
-			repo._old_commit( files, app.commitMessage(), app.commitUser(),
-			date, match, force, lock, wlock, force_editor )
-			# This was necessary for 0.9.3
-			print
-			print "Easycommit: Commit successful !"
-			print
-			print os.popen("hg tip").read()
-	else:
-		print "No changes: nothing to commit"
+
+	# And we invoke the commit editor
+	app = ConsoleUI()
+	app.ui.strings.USERNAME = USERNAME
+	res = app.main(commit_object)
+	if not res:
+		print "Nothing was commited"
+		return
+	files = map(lambda c:c.path, app.selectedChanges())
+	# FIXME: We might want to create a new match here
+	match._files  = files
+	match._always = False
+	# Now we execute the old commit method
+	if files:
+		message  = app.commitMessage()
+		user     = app.commitUser()
+		kwargs   = copy(kwargs)
+		kwargs["editor"] = None
+	return repo._old_commit( message, user, date, match, **kwargs )
 
 def command_defaults(ui, cmd):
 	"""Returns the default option values for the given Mercurial command. This
@@ -455,9 +475,10 @@ def command_defaults(ui, cmd):
 	else:
 		import mercurial.cmdutil
 		findcmd = mercurial.cmdutil.findcmd
-	return dict([(f[1].replace('-', '_'), f[2]) for f in findcmd(ui, cmd)[1][1]])
+	return {}
+	return dict([(f[1].replace('-', '_'), f[2]) for f in findcmd(cmd, ui)[1][1]])
 
-def easy_commit( ui, repo, *args, **opts ):
+def _commit( ui, repo, *args, **opts ):
 	"""This is the main function that is called by the 'hg' commands (actually
 	through the 'mercurial.commands.dispatch' function)."""
 	# Here we swap the default commit implementation with ours
@@ -467,8 +488,7 @@ def easy_commit( ui, repo, *args, **opts ):
 		repo_old_commit            = repo.__class__.commit
 		repo.__class__.commit      = commit_wrapper
 		repo.__class__._old_commit = repo_old_commit
-		new_opts = {}
-		for key, value in opts.items(): new_opts[key] = value
+		new_opts = copy(opts)
 		# Sets the default commit options
 		for key, value in command_defaults(ui, "commit").items():
 			if not opts.has_key(key): opts[key] = value
@@ -481,10 +501,10 @@ def easy_commit( ui, repo, *args, **opts ):
 	else:
 		new_opts = opts
 		mercurial.commands.commit(ui, repo, *args, **new_opts)
-	
+
 # This may change in the different Mercurial version, maybe we should find a
-# better way of doing this.d
+# better way of doing this.
 COMMIT_COMMAND =  mercurial.commands.table["^commit|ci"]
-cmdtable = { "commit": (easy_commit,  COMMIT_COMMAND[1],    COMMIT_COMMAND[2])}
+cmdtable = { "commit": (_commit,  COMMIT_COMMAND[1],    COMMIT_COMMAND[2])}
 
 # EOF - vim: tw=80 ts=4 sw=4 noet

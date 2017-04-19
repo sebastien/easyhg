@@ -1,6 +1,5 @@
 #!/usr/bin/env python
-# Encoding: iso-8859-1
-# vim: tw=80 ts=4 sw=4 noet fenc=latin-1
+# Encoding: utf8
 # -----------------------------------------------------------------------------
 # Project   : Mercurial - Easy tools
 # License   : GNU Public License         <http://www.gnu.org/licenses/gpl.html>
@@ -36,7 +35,8 @@ def hg_cat( rev, path ):
 	return res
 
 def command_main( ui, repo, *args, **opts ):
-	if not args: return
+	print ("ARGS", args)
+	#if not args: return
 	path = args[0]
 	fd, temp_path = tempfile.mkstemp(prefix="hg-changes-")
 	rev = hg_lastmodrev(path)
@@ -52,4 +52,4 @@ cmdtable = {
 	"changes": ( command_main, [], 'hg changes', "TODO" )
 }
 
-# EOF
+# EOF - vim: tw=80 ts=4 sw=4 noet

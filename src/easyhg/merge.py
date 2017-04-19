@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Encoding: iso-8859-1
+# Encoding: utf8
 # -----------------------------------------------------------------------------
 # Project   : Mercurial - Easy tools
 # License   : GNU Public License         <http://www.gnu.org/licenses/gpl.html>
@@ -43,7 +43,7 @@ Commands :
     unresolve [CONFLICT]                      - sets a conflict as unresolve
     clean     [DIRECTORY]                     - cleans up the conflict files
     commit                                    - try to commit the changes (TODO)
- 
+
 Usage:
 
     Mercurial will automatically invoke this command when merging, so that it
@@ -73,7 +73,7 @@ CONFLICTS_FILE = ".hgconflicts"
 
 BLACK = "BK"; RED = "RE"; BLUE="BL";  GREEN = "GR"; MAGENTA="MG"; CYAN = "CY"
 BROWN = "BW"
-PLAIN = ""  ; BOLD = "BOLD" 
+PLAIN = ""  ; BOLD = "BOLD"
 CODES = {
   BLACK         :"00;30", BLACK+BOLD    :"01;30",
   RED           :"00;31", RED+BOLD      :"01;31",
@@ -322,7 +322,7 @@ End
 
 INFO_TEMPLATE = """\
   @     LOCAL    trying to merge CURRENT with OTHER, where BASE is the common ancestor
-  | \\ 
+  | \\
   o  |  CURRENT  R%-3s on %s by %s
   |  o  OTHER    R%-3s on %s by %s
   .  .
@@ -332,9 +332,9 @@ INFO_TEMPLATE = """\
 
 class ResolutionHandler(urwide.Handler):
 
-	def __init__(self, easymerge, dialog, conflict ):
+	def __init__(self, merge, dialog, conflict ):
 		urwide.Handler.__init__(self)
-		self.easymerge = easymerge
+		self.merge = merge
 		self.dialog    = dialog
 		self.conflict  = conflict
 
@@ -348,26 +348,26 @@ class ResolutionHandler(urwide.Handler):
 			if radio.get_state(): break
 			else: selected += 1
 		if  selected == 0:
-			self.easymerge.ops.resolveConflictByMerging(self.conflict.number, "current", "other")
-			self.easymerge.main_ui.tooltip("Conflict was resolved by merging current and other")
+			self.merge.ops.resolveConflictByMerging(self.conflict.number, "current", "other")
+			self.merge.main_ui.tooltip("Conflict was resolved by merging current and other")
 		elif selected == 1:
-			self.easymerge.ops.resolveConflictByReplacing(self.conflict.number, "current")
-			self.easymerge.main_ui.tooltip("Conflict was resolved by updating to current")
+			self.merge.ops.resolveConflictByReplacing(self.conflict.number, "current")
+			self.merge.main_ui.tooltip("Conflict was resolved by updating to current")
 		elif selected == 2:
-			self.easymerge.ops.resolveConflictByReplacing(self.conflict.number, "other")
-			self.easymerge.main_ui.tooltip("Conflict was resolved by updating to other")
+			self.merge.ops.resolveConflictByReplacing(self.conflict.number, "other")
+			self.merge.main_ui.tooltip("Conflict was resolved by updating to other")
 		elif selected == 3:
-			self.easymerge.ops.resolveConflictByReplacing(self.conflict.number, "base")
-			self.easymerge.main_ui.tooltip("Conflict was resolved by updating to base")
+			self.merge.ops.resolveConflictByReplacing(self.conflict.number, "base")
+			self.merge.main_ui.tooltip("Conflict was resolved by updating to base")
 		elif selected == 4:
-			self.easymerge.main_ui.tooltip("Conflict was resolved by keeping the local file")
-			self.easymerge.ops.resolveConflictByKeepingLocal(self.conflict.number)
+			self.merge.main_ui.tooltip("Conflict was resolved by keeping the local file")
+			self.merge.ops.resolveConflictByKeepingLocal(self.conflict.number)
 		else:
 			raise Exception("Internal error")
-		self.easymerge.updateConflicts()
+		self.merge.updateConflicts()
 
 class ConsoleUI(urwide.Handler):
-	"""Main user interface for easymerge."""
+	"""Main user interface for merge."""
 
 	def __init__(self, conflicts):
 		urwide.Handler.__init__(self)
@@ -533,7 +533,7 @@ class ConsoleUI(urwide.Handler):
 				self.ops.reviewConflict(conflict)
 		else:
 			# Reviews the conflict
-			if   key == "v": 
+			if   key == "v":
 				self.ops.reviewConflict(conflict)
 			# Selects the current choice
 			elif key == "enter" or key == "r":
@@ -548,7 +548,7 @@ class ConsoleUI(urwide.Handler):
 
 	def onKeyPress( self, widget, key ):
 		if  key == "q":
-			self.ui.end() 
+			self.ui.end()
 			return
 		elif key == "c":
 			if not self.ui.data.conflicts.unresolved():
@@ -728,7 +728,7 @@ class Conflict:
 class Conflicts:
 	"""This is a utility class that represents the list of conflicts, and
 	whether they are resolved or not. It is used by all commands, and makes it
-	easy to manage the conflicts file."""
+	 to manage the conflicts file."""
 
 	def __init__( self, path="." ):
 		# We look for the base directory where the conflicts file is located
@@ -1013,11 +1013,14 @@ class Operations:
 				return
 			for conflict in unresolved:
 				# FIXME: Add choice of action
-				self.resolveConflict(conflict.number) 
+				self.resolveConflict(conflict.number)
 		else:
 			for number in numbers:
 				# FIXME: Add choice of action
-				self.resolveConflict(number) 
+				self.resolveConflict(number)
+
+	def resolveConflict( self, number ):
+		return self.resolveConflictByMerging(number)
 
 	def unresolve( self, *numbers):
 		"""Unresolve the given conflicts."""
