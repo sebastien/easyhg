@@ -16,7 +16,7 @@
 #  - http://marc.info/?l=mercurial&m=114719261130043&w=2
 #  - http://marc.info/?t=114719277400001&r=1&w=2
 
-import os, sys, re, shutil, difflib, stat, sha
+import os, sys, re, shutil, difflib, stat, sha, json
 import easyhg.mergetool as mergetool
 from easyhg.output import *
 try:
@@ -73,7 +73,7 @@ CONFLICTS_FILE = ".hgconflicts"
 BASE           = "base"
 CURRENT        = "current"
 OTHER          = "other"
-CLEAN_MATCH    = re.compile("^.+\.(orig|(base|current|other|" + "|".join([OTHER, CURRENT, BASE]) + ")(-r\d+)(-\w+)?(\.\d+)?)$")
+CLEAN_MATCH    = re.compile("^.+\.(orig|(base|current|other|" + "|".join([OTHER, CURRENT, BASE]) + ")((-r|-pro)\d+)(-\w+)?(\.\d+)?)$")
 
 # -----------------------------------------------------------------------------
 #
@@ -551,6 +551,7 @@ class ConsoleUI(urwide.Handler):
 	def onCommit( self, widget ):
 		os.system("hg commit")
 		self.main_ui.end()
+		self.ops.clean()
 
 	# Operations bindings
 	# ------------------------------------------------------------------------
@@ -582,10 +583,11 @@ class Conflict:
 	SEPARATOR  = " -- "
 
 	def __init__( self, number, path, currentPath, basePath, otherPath,
-	state=None, description="" ):
+	state=None, description="", provisional=False ):
 		if not state: state = Conflict.UNRESOLVED
 		assert type(number) == int
 		self.conflicts = None
+		self.provisional = provisional
 		self.number = number
 		self.state  = state
 		self._path  = path
@@ -594,10 +596,73 @@ class Conflict:
 		self._otherPath   = otherPath
 		self.description  = description
 
+	def toJSON( self ):
+		return dict(
+			number      = self.number,
+			path        = self._path,
+			currentPath = self._currentPath,
+			basePath    = self._basePath,
+			otherPath   = self._otherPath,
+			state       = self.state,
+			description = self.description,
+			provisional = self.provisional,
+		)
+
+	@classmethod
+	def fromJSON( self, kwargs ):
+		return Conflict(**kwargs)
+
 	def getState( self ):
 		"""Returns the state for this conflict (Conflict.RESOLVED or
 		Conflict.UNRESOLVED)"""
 		return self.state
+
+	def provision( self, current, other, base ):
+		# TODO: provisional data should be stored in the .hgconflicts file,
+		# so that the files can't be removed from the fs
+		if not self.provisional: return self
+		local        = self._path
+		base_path    = self._basePath
+		current_path = self._currentPath
+		other_path   = self._otherPath
+		current_copy = local + ".current-r" + current[0]
+		other_copy   = local + ".other-r"   + other[0]
+		base_copy    = local + ".base-r"    + base[0]
+		# We backup .orig, .base and .new that may already be tehre
+		backups = []
+		for p,o in ((base_copy, base_path), (current_copy, current_path), (other_copy, other_path)):
+			if os.path.exists(p):
+				with open(p) as f: pt = f.read()
+				with open(o) as f: ot = f.read()
+				if pt != ot:
+					suffix  = 0
+					prefix  = p + ".backup"
+					path    = prefix
+					while os.path.exists(path):
+						path = prefix + suffix
+						suffix += 1
+					backups.append((p,path))
+		for o,n in backups:
+			warning("Previous conflict files present and differ, backing up {0} as {1}".format(o,n))
+			shutil.move(o, n)
+		# And we create the new ones
+		info(u"Provisioning conflict for {0}".format(self._path))
+		info(u"◌ LOCAL   = {0}".format(self._path))
+		info(u"○ CURRENT = {0}".format(current_copy))
+		info(u"● OTHER   = {0}".format(other_copy))
+		info(u"△ BASE    = {0}".format(base_copy))
+		for n,o in ((base_copy, base_path), (current_copy, current_path), (other_copy, other_path)):
+			if n != o:
+				if not os.path.exists(o):
+					warning("Missing provisional conflict file: {0}".format(o))
+				else:
+					shutil.move(o, n)
+					os.chmod(n, stat.S_IREAD|stat.S_IRUSR|stat.S_IRGRP)
+		self.provisional  = False
+		self._currentPath = current_copy
+		self._basePath    = base_copy
+		self._otherPath   = other_copy
+		return self
 
 	def describe( self ):
 		l,c,b,o = self._sigs()
@@ -665,23 +730,6 @@ class Conflict:
 	def isResolved( self ):
 		return self.state == self.RESOLVED
 
-	@staticmethod
-	def parse( line, number=-1 ):
-		"""Returns a new conflict from the given conflict string
-		representation."""
-		line     = line.strip() + " "
-		if not line: return
-		number, l, c, p, o, d = line.split(" : ")
-		if number.strip().upper().startswith("R"):
-			status = Conflict.RESOLVED
-			number = number[1:]
-		else:
-			status = Conflict.UNRESOLVED
-		description = ""
-		c = Conflict(int(number), l, c, p, o, d)
-		c.state = status
-		return c
-
 	def asString( self ):
 		a = cutpath(os.path.abspath(os.getcwd()), self.path())
 		b = cutpath(os.path.abspath(os.getcwd()), self.current())
@@ -699,11 +747,11 @@ class Conflict:
 		d = cutpath(os.path.abspath(os.getcwd()), self.base())
 		p = self.state == self.RESOLVED and "R" or " "
 		# TODO: Add explanation for resolution (like "same as other")
-		s = " " * len(d.rsplit("-",1)[-1])
+		s = u" " * len(d.rsplit("-",1)[-1])
 		return (
-			"   %s     ╭───● %s = yours\n"
-			"   %s ▷───│\n"
-			"   %s     ╰───◀ %s ← to merge"
+			u"   %s     ╭───● %s = yours\n"
+			u"   %s ▷───│\n"
+			u"   %s     ╰───◀ %s ← to merge"
 		% (
 			s, c.rsplit("-",1)[-1],
 			d.rsplit("-",1)[-1],
@@ -757,7 +805,7 @@ class Conflicts:
 		self._path        = os.path.join(path, CONFLICTS_FILE)
 		self._conflicts   = None
 		self._currentInfo = None
-		self._baseInfo  = None
+		self._baseInfo    = None
 		self._otherInfo   = None
 		self.load()
 
@@ -779,46 +827,50 @@ class Conflicts:
 	def setOtherInfo(self,info):
 		self._otherInfo = info
 
+	def getRevs( self ):
+		return hg_get_merge_revisions(os.path.dirname(self._path))
+
 	def load( self ):
 		"""Reads the conflicts from the file, if it exists"""
 		self._conflicts = []
+		revs = hg_get_merge_revisions(os.path.dirname(self._path))
 		if not os.path.isfile(self._path):
-			revs       = hg_get_merge_revisions(os.path.dirname(self._path))
-			if len(revs) == 0:
+			self.setCurrentInfo(revs[0])
+			if len(revs) < 3:
 				return False
-			ci, oi, pi =  revs
+			# NOTE: Sometimes we might have more than 3 revisions, not sure
+			# what to do then.
+			ci, oi, pi =  revs[0:3]
 			self.setCurrentInfo(ci)
 			self.setBaseInfo(pi)
 			self.setOtherInfo(oi)
 			return True
-		f = file(self._path, "rt")
-		# We read the lines and fill in the _conflicts list
-		for line in f.readlines():
-			if line.startswith("CURRENT:"):
-				self.setCurrentInfo(eval(line[len("CURRENT:"):-1].strip()))
-			elif line.startswith("BASE:"):
-				self.setBaseInfo(eval(line[len("BASE:"):-1].strip()))
-			elif line.startswith("OTHER:"):
-				self.setOtherInfo(eval(line[len("OTHER:"):-1].strip()))
-			else:
-				result = Conflict.parse(line[:-1], number=len(self._conflicts))
-				result.conflicts = self
-				if result: self._conflicts.append(result)
-		f.close()
+		else:
+			with open(self._path, "r") as f:
+				data = json.load(f)
+			self.setCurrentInfo(data["current"])
+			self.setBaseInfo(data["base"])
+			self.setOtherInfo(data["other"])
+			self._conflicts = [
+				Conflict.fromJSON(_) for _ in data["conflicts"]
+			]
+			# If we have no base then we need to expand the conflicts now
+			if data["base"] is None:
+				self.setCurrentInfo(revs[0])
+				self.setOtherInfo  (revs[1])
+				self.setBaseInfo   (revs[2])
+				self._conflicts = [_.provision(revs[0], revs[1], revs[2]) for _ in self._conflicts]
+				self.save()
 
 	def save( self ):
 		"""Writes back the conflicts to the file, overwriting it."""
-		res = ""
-		res += "CURRENT:" + repr(self.getCurrentInfo()) + "\n"
-		res += "OTHER:  " + repr(self.getOtherInfo())   + "\n"
-		res += "BASE: "   + repr(self.getBaseInfo())  + "\n"
-		for conflict in self._conflicts:
-			res += str(conflict) + "\n"
-		res = res[:-1]
-		# We remove the trailing EOL
-		f = file(self._path, "w")
-		f.write(res)
-		f.close()
+		with open(self._path, "w") as f:
+			 json.dump(dict(
+				current = self.getCurrentInfo(),
+				other   = self.getOtherInfo(),
+				base    = self.getBaseInfo(),
+				conflicts = [_.toJSON() for _ in self._conflicts]
+			), f)
 
 	def all( self ):
 		return self._conflicts
@@ -841,10 +893,28 @@ class Conflicts:
 			if not res: return None
 			else: return res[0]
 
-	def add( self, path, currentPath, basePath, otherPath ):
+	def register( self, current, base, other ):
+		"""Registers a new conflict, which creates provisional files for the
+		merge. At this stage, all the revisions are not known (mercurial being
+		in the process of merging). The provisional conflicts will be
+		completed on the next run when the parents are known."""
+		for p in (current, base, other):
+			if not os.path.exists(p):
+				error("Cannot register conflict as file is missing: {0}".format(p))
+				return False
+		rev = hg_get_merge_revisions(os.path.dirname(self._path))[0]
+		base_provisional     = current + ".base-pro"    + rev[0]
+		current_provisional  = current + ".current-pro" + rev[0]
+		other_provisional    = current + ".other-pro"   + rev[0]
+		shutil.copyfile(base,  base_provisional)
+		shutil.copyfile(other, other_provisional)
+		shutil.copyfile(current, current_provisional)
+		self.add(current, current_provisional, base_provisional, other_provisional, True)
+
+	def add( self, path, currentPath, basePath, otherPath, provisional=False ):
 		"""Adds a new conflict between the given files, and returns the conflict
 		as a (STATE, ID, FILES) triple."""
-		path    = os.path.abspath(path)
+		path    = os.path.abspath(path) if path else None
 		base    = os.path.abspath(basePath)
 		other   = os.path.abspath(otherPath)
 		current = os.path.abspath(currentPath)
@@ -858,10 +928,10 @@ class Conflicts:
 				return c
 		# Eventually adds the conflict
 		next     = len(self.unresolved())
-		conflict = Conflict(next, path, current, base, other)
+		conflict = Conflict(next, path, current, base, other, provisional=provisional)
 		assert other   == conflict.other(), "Internal error"
 		assert current == conflict.current(), "Internal error"
-		assert base  == conflict.base(), "Internal error"
+		assert base    == conflict.base(), "Internal error"
 		self._conflicts.append(conflict)
 		return conflict
 
@@ -929,12 +999,13 @@ class Operations:
 	def command( self, command ):
 		os.system(command)
 
-	def addConflicts( self, path, currentPath, basePath, otherPath ):
-		"""Adds the given conflict to the list of conflicts (stored in a
-		'.hgconflicts' file), in the given root directory."""
-		c = self.conflicts.add(path, currentPath, basePath, otherPath)
-		self.conflicts.save()
-		return c
+	# FIXME
+	# def addConflict( self, path, currentPath, basePath, otherPath ):
+	# 	"""Adds the given conflict to the list of conflicts (stored in a
+	# 	'.hgconflicts' file), in the given root directory."""
+	# 	c = self.conflicts.add(path, currentPath, basePath, otherPath)
+	# 	self.conflicts.save()
+	# 	return c
 
 	def listConflicts( self ):
 		"""Lists the conflicts in the given directory."""
@@ -981,7 +1052,11 @@ class Operations:
 		}
 		self.log("Resolving conflict", conflict.path() ,"by", self.format("merging",color=BLUE,  weight=BOLD))
 		self.info(conflict.asExplanation())
+		# FIXME: ASCII error
+		# for rev in self.conflicts.getRevs():
+		# 	self.info(u"{0} {1} {2}".format(*rev))
 		self.log("$ " + conflict.asCommand())
+		# TODO: Should add detail about the revision (auth
 		mergetool.merge3(paths["local"], paths["current"], paths["other"], paths["base"])
 		res = self.ask("Did you resolve the conflict (y/n) ? ")
 		if res == "y":
@@ -1124,23 +1199,17 @@ def hg_get_revision_info(rev, path="."):
 def hg_get_merge_revisions(path="."):
 	"""Returns a tuple (CURRENT, PARENT, OTHER) where each value is a couple
 	(REV, CHANGESET ID)."""
-	lines = os.popen("cd '%s' ; hg heads" % (path)).read().split("\n")
+	lines = os.popen("hg --repository {0} id -n".format(path)).read().split("\n")
+	revs  = [_ for _ in lines[0].split("+") if _]
+	if len(revs) >= 2:
+		ancestor = os.popen( "hg --repository {0} id -n -r'ancestor({1},{2})'".format(path, revs[0], revs[1])).read()
+		revs.append(ancestor.split("\n")[0])
 	res   = []
-	for line in lines:
-		if line.startswith("changeset:"):
-			rev = list(map(lambda x:x.strip(),line.split(":")[1:]))[0]
+	for rev in revs:
+		if rev:
 			info = [rev]
 			info.extend(hg_get_revision_info(rev, path))
 			res.append(info)
-	# FIXME: Awful hack, but we need to get the details about the revision
-	if len(res) == 2:
-		if os.environ.has_key("HG_BASE_NODE"):
-			rev = os.environ["HG_BASE_NODE"]
-		else:
-			rev = "0"
-		info = [rev]
-		info.extend(hg_get_revision_info(rev,path))
-		res.append(info)
 	return res
 
 RE_NUMBER = re.compile("\d+")
@@ -1212,45 +1281,14 @@ def run(args):
 		# We print the conflict
 		cnf  = Conflicts(root)
 		ops  = Operations(cnf)
-		current_copy            = local + ".current-r" + cnf.getCurrentInfo()[0]
-		other_copy              = local + ".other-r"   + cnf.getOtherInfo()[0]
-		base_copy               = local + ".base-r"  + cnf.getBaseInfo()[0]
-		conflict = ops.addConflicts(local, current_copy, base_copy, other_copy)
-		print "Conflict %4d:%-40s %s" % (conflict.number,
-			cutpath(root, local), "[" + str(int(diff_count(local, other))) + "% equivalent]"
-		)
-		print "  base       ", cutpath(root, base_copy)
-		print "  current    ", cutpath(root, current_copy)
-		print "  other      ", cutpath(root, other_copy)
-		# We backup .orig, .base and .new that may already be tehre
-		backups = []
-		for p,o in ((base_copy, base), (current_copy, local), (other_copy, other)):
-			if os.path.exists(p):
-				with open(p) as f: pt = f.read()
-				with open(o) as f: ot = f.read()
-				if pt != ot:
-					suffix  = 0
-					prefix  = p + ".backup"
-					path    = prefix
-					while os.path.exists(path):
-						path = prefix + suffix
-						suffix += 1
-					backups.append((p,path))
-		for o,n in backups:
-			warning("Previous conflict files present and differ, backing up {0} as {1}".format(o,n))
-			shutil.move(o, n)
-		# And we create the new ones
-		shutil.copyfile(local, current_copy)
-		shutil.copyfile(base,  base_copy)
-		shutil.copyfile(other, other_copy)
-		map(lambda p:os.chmod(p, stat.S_IREAD|stat.S_IRUSR|stat.S_IRGRP),
-		(current_copy, base_copy, other_copy))
+		cnf.register(local, base, other)
+		cnf.save()
 		info(
-			"You can:\n"
-			"- resolve conflicts   :", PROGRAM_NAME, "resolve N (keep|update|merge)\n"
-			"- unresolve conflicts :", PROGRAM_NAME, "unresolve N‥\n"
-			"- list conflicts      :", PROGRAM_NAME, "list\n"
-			"- commit your merge   :", PROGRAM_NAME, "commit"
+			u"You can:\n"
+			u"- resolve conflicts   :", PROGRAM_NAME, u"resolve N (keep|update|merge)\n"
+			u"- unresolve conflicts :", PROGRAM_NAME, u"unresolve N‥\n"
+			u"- list conflicts      :", PROGRAM_NAME, u"list\n"
+			u"- commit your merge   :", PROGRAM_NAME, u"commit"
 		)
 		return 0
 	else:

@@ -31,19 +31,24 @@ def format( message, color=BLACK, weight=PLAIN ):
 #
 # -----------------------------------------------------------------------------
 
+def _write( value ):
+	sys.stdout.write(value)
+
+def normargs(args):
+	return [_.encode("utf8") for _ in  args]
+
 def ask( question ):
-	sys.stdout.write(format(question, weight=BOLD, color=WHITE) + " ")
+	_write(format(question, weight=BOLD, color=WHITE) + " ")
 	return sys.stdin.readline().lower().strip()
 
 def error( *args ):
-	sys.stdout.write(format("ERROR: ", color=RED, weight=BOLD) + format(
-	" ".join(map(str,args)), color=RED) + "\n")
+	_write(format("ERROR: ", color=RED, weight=BOLD) + format(u" ".join(normargs(args)), color=RED) + "\n")
 
 def warning( *args ):
-	sys.stdout.write(format(" ".join(map(str,args)), YELLOW + BOLD) + "\n")
+	_write(format(" ".join(normargs(args)), YELLOW + BOLD) + "\n")
 
 def info( *args ):
-	sys.stdout.write(format(" ".join(map(str,args)),GREEN + BOLD) + "\n")
+	_write(format(" ".join(normargs(args)),GREEN + BOLD) + "\n")
 
 def log( *args ):
-	sys.stdout.write(" ".join(map(str,args)) + "\n")
+	_write(" ".join(normargs(args)) + "\n")
