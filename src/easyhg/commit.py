@@ -13,14 +13,14 @@
 import sys, os, re, time, stat, tempfile
 import easyhg.mergetool as mergetool
 from   copy import copy
+from   fnmatch import fnmatch
 import urwide, urwid
 from   mercurial.i18n import gettext as _
 from   mercurial.match import match
 import mercurial
 import mercurial.commands
 import mercurial.localrepo
-
-
+from easyhg.output import *
 
 # FIX for 0.9.4 version of Mercurial
 try:
@@ -78,24 +78,25 @@ Text*         : WH, DM, BO
 CONSOLE_UI = """\
 Hdr MERCURIAL - Easycommit %s
 
-Edt Name          [$USERNAME]                   #edit_user
-Edt Tags          [Update]                      #edit_tags    ?TAGS    &key=tag
-Edt Scope         [scope]                       #edit_scope   ?SCOPE   &key=scope
-Edt Summary       [One line commit summary]     #edit_summary ?SUMMARY &key=sumUp
+Edt Name          [$USERNAME]               #edit_user
+Edt Tags          [Update]                  #edit_tags    ?TAGS    &key=tag
+Edt Scope         [‥]                       #edit_scope   ?SCOPE   &key=scope
+Edt Summary       [‥]                       #edit_summary ?SUMMARY &key=sumUp
 Dvd ___
 
 Box
-  Edt [Commit description]                       #edit_desc    ?DESC &key=describe multiline=True
+  Edt [‥]                                   #edit_desc    ?DESC &key=describe multiline=True
 End
+
 Dvd ___
 
-Ple                                              #changes
+Ple                                         #changes
 End
 Dvd ___
 
 GFl
-	Btn [Cancel]                                  #btn_cancel  &press=cancel
-	Btn [Commit]                                  #btn_commit  &press=commit
+	Btn [Cancel]                            #btn_cancel  &press=cancel
+	Btn [Commit]                            #btn_commit  &press=commit
 End
 
 	""" % (__version__)
@@ -117,8 +118,11 @@ class ConsoleUI:
 		self.ui.create(CONSOLE_STYLE, CONSOLE_UI)
 		self.ui.DEFAULT_SUMMARY     = self.ui.widgets.edit_summary.get_edit_text()
 		self.ui.DEFAULT_DESCRIPTION = self.ui.widgets.edit_desc.get_edit_text()
+		self.ui.DEFAULT_SCOPE       = self.ui.widgets.edit_scope.get_edit_text()
 		self.ui.data.commit = commit
 		if commit:
+			if commit.changed(".hgsub*") or commit.added(".hgsub*"):
+				self.ui.widgets.edit_scope.set_edit_text("Submodules")
 			self.defaultHandler.updateCommitFiles()
 		return self.ui.main()
 
@@ -130,13 +134,15 @@ class ConsoleUI:
 		scope = self.ui.widgets.edit_scope.get_edit_text()
 		tags  = self.ui.widgets.edit_tags.get_edit_text()
 		desc  = self.ui.widgets.edit_desc.get_edit_text()
+		if scope.startswith("‥"): scope = ""
+		if desc.startswith("‥"):  desc  = ""
 		if tags:
 			tags = "".join("[{0}]".format(_.strip()) for _ in tags.split() if _.strip)
-		msg = "{0}{1}{2}\n\n{3}".format(
+		msg = "{0} {1}{2}{3}".format(
 			tags,
-			scope,
+			scope + ": " if scope else "",
 			summ,
-			desc
+			"\n\n" + desc if desc else ""
 		)
 		while msg.find("\n\n") != -1: msg = msg.replace("\n\n", "\n")
 		return msg
@@ -159,13 +165,15 @@ class ConsoleUIHandler(urwide.Handler):
 		self.ui.end()
 
 	def onSumUp( self, widget, key ):
-		if hasattr(widget, "_summaryEdited"): return False
+		if hasattr(widget, "_alreadyEdited"): return False
 		if key in ("left", "right", "up", "down", "tab", "shift tab"): return False
 		widget.set_edit_text("")
 		widget._alreadyEdited = True
-		return False
 
 	def onScope( self, widget, key ):
+		return self.onSumUp(widget, key)
+
+	def onDescribe( self, widget, key ):
 		return self.onSumUp(widget, key)
 
 	def isTag( self, tagname ):
@@ -221,22 +229,6 @@ class ConsoleUIHandler(urwide.Handler):
 		else:
 			return False
 
-	def onScope( self, widget, key ):
-		if key in ("left", "right", "up", "down", "tab", "shift tab"):
-			return False
-		if not hasattr(widget, "_alreadyEdited"):
-			widget.set_edit_text("")
-			widget._alreadyEdited = True
-		return False
-
-	def onDescribe( self, widget, key ):
-		if key in ("left", "right", "up", "down", "tab", "shift tab"):
-			return False
-		if not hasattr(widget, "_alreadyEdited"):
-			widget.set_edit_text("")
-			widget._alreadyEdited = True
-		return False
-
 	def onChangeInfo( self, widget ):
 		self.ui.tooltip(widget.commitEvent.info())
 		self.ui.info(self.ui.strings.CHANGE)
@@ -248,13 +240,14 @@ class ConsoleUIHandler(urwide.Handler):
 			return False
 
 	def onKeyPress( self, widget, key ):
-		if key == "q":
+		if key in ("q", "esc"):
 			self.onCancel(widget)
 		elif key == "s":
 			self.onSave(widget)
 		elif key == "c":
 			self.onCommit(widget)
-		return False
+		else:
+			return False
 
 	# SPECIFIC ACTIONS
 	# _________________________________________________________________________
@@ -272,7 +265,9 @@ class ConsoleUIHandler(urwide.Handler):
 			urwide.add_widget(changes, self.ui.wrap(checkbox, "?CHANGE &focus=changeInfo"))
 			self.ui.onFocus(checkbox, "changeInfo")
 			self.ui.onKey(checkbox, "change")
-		self.ui.widgets.changes.set_focus(0)
+		if commit.events:
+			# When only the .hgsubstate has changed, we might have 0 events
+			self.ui.widgets.changes.set_focus(0)
 
 	def reviewFile( self, commitEvent ):
 		parent_rev = commitEvent.parentRevision()
@@ -307,6 +302,15 @@ class Commit:
 	def __init__( self, repo ):
 		self.events = []
 		self.repo   = repo
+
+	def changed( self, match=None ):
+		return [_ for _ in self.events if isinstance(_, ChangeEvent) and _.match(match)]
+
+	def removed( self, match=None ):
+		return [_ for _ in self.events if isinstance(_, RemoveEvent) and _.match(match)]
+
+	def added( self, match=None ):
+		return [_ for _ in self.events if isinstance(_, AddEvent) and _.match(match)]
 
 	def commandInRepo( self, command ):
 		"""Executes the given command within the repository, and returns its
@@ -355,6 +359,12 @@ class Event:
 	def abspath( self ):
 		"""Returns the absolute path for this event."""
 		return os.path.join(os.path.dirname(self.parent.repo.path), self.path)
+
+	def match( self, expr ):
+		if expr is None:
+			return True
+		else:
+			return expr == self.path or fnmatch(self.path, expr)
 
 	def info( self ):
 		"""Returns additional info on the event."""
@@ -430,11 +440,20 @@ def commit_wrapper(repo, message, user, date, match, **kwargs):
 	removed   = []
 	deleted   = []
 	changed   = []
+	ignored   = []
+	cleaned   = []
 
 	if not match:
 		match = mercurial.localrepo.always(repo.root, '')
 
-	changed, added, removed, deleted, unknown, ignored, clean = repo.status(match=match)
+	for change in repo.changelog:
+		ch, ad, rm, dt, un, ig, cl = repo.status(change)
+		changed += ch
+		added   += ad
+		deleted += ad
+		removed += rm
+		ignored += ig
+		cleaned += cl
 
 	# We create a commit object that sums up the information
 	commit_object = Commit(repo)
@@ -447,14 +466,15 @@ def commit_wrapper(repo, message, user, date, match, **kwargs):
 	app.ui.strings.USERNAME = USERNAME
 	res = app.main(commit_object)
 	if not res:
-		print "Nothing was commited"
+		info("Nothing was commited")
 		return
 	files = map(lambda c:c.path, app.selectedChanges())
 	# FIXME: We might want to create a new match here
-	match._files  = files
-	match._always = False
 	# Now we execute the old commit method
 	if files:
+		if len(files) != len(commit_object.events):
+			match._files  = files
+			match._always = False
 		message  = app.commitMessage()
 		user     = app.commitUser()
 		kwargs   = copy(kwargs)
@@ -502,9 +522,12 @@ def _commit( ui, repo, *args, **opts ):
 		new_opts = opts
 		mercurial.commands.commit(ui, repo, *args, **new_opts)
 
-# This may change in the different Mercurial version, maybe we should find a
-# better way of doing this.
+# SEE: https://www.mercurial-scm.org/wiki/WritingExtensions
+cmdtable       = {}
+command        = mercurial.cmdutil.command(cmdtable)
 COMMIT_COMMAND =  mercurial.commands.table["^commit|ci"]
-cmdtable = { "commit": (_commit,  COMMIT_COMMAND[1],    COMMIT_COMMAND[2])}
+@command('easycommit', COMMIT_COMMAND[1])
+def commit( *args, **kwargs ):
+	return _commit(*args, **kwargs)
 
 # EOF - vim: tw=80 ts=4 sw=4 noet

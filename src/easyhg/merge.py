@@ -17,14 +17,15 @@
 #  - http://marc.info/?t=114719277400001&r=1&w=2
 
 import os, sys, re, shutil, difflib, stat, sha
-import mergetool
+import easyhg.mergetool as mergetool
+from easyhg.output import *
 try:
 	import urwide, urwid
 except:
 	urwide = None
 
 __version__ = "0.9.4"
-PROGRAM_NAME = os.path.splitext(os.path.basename(__file__))[0]
+PROGRAM_NAME = "easymerge"
 
 USAGE = """\
 %s %s
@@ -46,6 +47,12 @@ Commands :
 
 Usage:
 
+    Edit your ~/.hgrc file and set [ui] merge=easymerge:
+
+        [ui]
+        merge = easymerge
+        ‥
+
     Mercurial will automatically invoke this command when merging, so that it
     creates three files in the same directory as the ORIGINAL file with
     extensions '.current', '.base' or '.other' corresponding to copies of the
@@ -62,54 +69,11 @@ Usage:
     whenever you want (for instance, when you do not want to merge anymore).
 """ % (PROGRAM_NAME, __version__, PROGRAM_NAME, PROGRAM_NAME)
 
-CLEAN_MATCH    = re.compile("^.+\.(current|base|other|merge|orig)(-r\d+)?(-\w+)?(\.\d+)?$")
 CONFLICTS_FILE = ".hgconflicts"
-
-# ------------------------------------------------------------------------------
-#
-# COLORED TERMINAL OUTPUT
-#
-# ------------------------------------------------------------------------------
-
-BLACK = "BK"; RED = "RE"; BLUE="BL";  GREEN = "GR"; MAGENTA="MG"; CYAN = "CY"
-BROWN = "BW"
-PLAIN = ""  ; BOLD = "BOLD"
-CODES = {
-  BLACK         :"00;30", BLACK+BOLD    :"01;30",
-  RED           :"00;31", RED+BOLD      :"01;31",
-  GREEN         :"00;32", GREEN+BOLD    :"01;32",
-  BROWN         :"00;33", BROWN+BOLD    :"01;33",
-  BLUE          :"00;34", BLUE+BOLD     :"01;34",
-  MAGENTA       :"00;35", MAGENTA+BOLD  :"01;35",
-  CYAN          :"00;36", CYAN+BOLD     :"01;36",
-}
-
-def format( message, color=BLACK, weight=PLAIN ):
-  """Formats the message to be printed with the following color and weight"""
-  return '[0m[' + CODES[color+weight] + 'm' + str(message) + '[0m'
-
-# -----------------------------------------------------------------------------
-#
-# LOGGING
-#
-# -----------------------------------------------------------------------------
-
-def ask( question ):
-	print format(question, weight=BOLD) + " ",
-	return sys.stdin.readline().lower().strip()
-
-def error( *args ):
-	print format("ERROR: ", color=RED, weight=BOLD) + format(
-	" ".join(map(str,args)), color=RED)
-
-def warning( *args ):
-	print format(" ".join(map(str,args)),MAGENTA)
-
-def info( *args ):
-	print format(" ".join(map(str,args)),CYAN)
-
-def log( *args ):
-	print " ".join(map(str,args))
+BASE           = "base"
+CURRENT        = "current"
+OTHER          = "other"
+CLEAN_MATCH    = re.compile("^.+\.(orig|(base|current|other|" + "|".join([OTHER, CURRENT, BASE]) + ")(-r\d+)(-\w+)?(\.\d+)?)$")
 
 # -----------------------------------------------------------------------------
 #
@@ -208,15 +172,15 @@ Hdr           : BL, Lg, BO
 CONSOLE_UI = """\
 Hdr MERCURIAL - Easymerge %s
 
-Txt  Easymerge allows you to easily merge two branches.
-Txt  Merging is done using the merge tool specified by the MERGETOOL environment variable
+Txt  Merging  ○ CURRENT(theirs) + ● OTHER(yours) = ◌ LOCAL
+Txt           △ BASE(ancestor)
 
 $REVINFO
 
 ---
 
 Col
-    Txt  Path
+    Txt Path
     Txt Status
     Txt Details
 End
@@ -247,17 +211,17 @@ Hdr
 
 Txt Merge
 
-Chc [X:R] Merge R%-3s (current) and R%-3s (other)
+Chc [X:R] Merge ○ R%-3s CURRENT and ● R%-3s OTHER
 
-Txt Update
+Txt Choose
 
-Chc [ :R] Update to R%-3s (current)
-Chc [ :R] Update to R%-3s (other)
-Chc [ :R] Update to R%-3s (base)
+Chc [ :R] Use ○ R%-3s (theirs/current)
+Chc [ :R] Use ● R%-3s (yours/other)
+Chc [ :R] Use △ R%-3s (base)
 
 Txt Keep
 
-Chc [ :R] Keep local  (if you made/make changes manually)
+Chc [ :R] Keep ◌ LOCAL (if you made/make changes manually) &key=doMayResolve
 
 ---
 
@@ -321,13 +285,13 @@ End
 """
 
 INFO_TEMPLATE = """\
-  @     LOCAL    trying to merge CURRENT with OTHER, where BASE is the common ancestor
-  | \\
-  o  |  CURRENT  R%-3s on %s by %s
-  |  o  OTHER    R%-3s on %s by %s
-  .  .
-  | /
-  o     BASE     R%-3s on %s by %s\
+  ◌┄┄┄╮  LOCAL
+  │   │
+  ○   │  CURRENT  R%-3s by %s on %s
+  │   ●  OTHER    R%-3s by %s on %s
+  │───╯
+  │
+  △      BASE     R%-3s on %s by %s\
 """
 
 class ResolutionHandler(urwide.Handler):
@@ -341,24 +305,37 @@ class ResolutionHandler(urwide.Handler):
 	def onCancel(self, widget):
 		self.dialog.end()
 
-	def onDoResolve(self, widget):
-		self.dialog.end()
+	def onKeyPress( self, widget, key) :
+		focus = urwide.original_focus(widget)
+		if key == "enter":
+			for radio in self.dialog.groups.R:
+				if radio == focus and radio.get_state():
+					self.onDoResolve(widget)
+					return True
+		return False
+
+	def getSelection( self ):
 		selected = 0
 		for radio in self.dialog.groups.R:
 			if radio.get_state(): break
 			else: selected += 1
+		return selected
+
+	def onDoResolve(self, widget):
+		self.dialog.end()
+		selected = self.getSelection()
 		if  selected == 0:
-			self.merge.ops.resolveConflictByMerging(self.conflict.number, "current", "other")
-			self.merge.main_ui.tooltip("Conflict was resolved by merging current and other")
+			self.merge.ops.resolveConflictByMerging(self.conflict.number)
+			self.merge.main_ui.tooltip("Conflict was resolved by merging {0} and {1}".format(CURRENT, OTHER))
 		elif selected == 1:
 			self.merge.ops.resolveConflictByReplacing(self.conflict.number, "current")
-			self.merge.main_ui.tooltip("Conflict was resolved by updating to current")
+			self.merge.main_ui.tooltip("Conflict was resolved by updating to {0}".format(CURRENT))
 		elif selected == 2:
 			self.merge.ops.resolveConflictByReplacing(self.conflict.number, "other")
-			self.merge.main_ui.tooltip("Conflict was resolved by updating to other")
+			self.merge.main_ui.tooltip("Conflict was resolved by updating to {0}".format(OTHER))
 		elif selected == 3:
 			self.merge.ops.resolveConflictByReplacing(self.conflict.number, "base")
-			self.merge.main_ui.tooltip("Conflict was resolved by updating to base")
+			self.merge.main_ui.tooltip("Conflict was resolved by updating to {0}".format(BASE))
 		elif selected == 4:
 			self.merge.main_ui.tooltip("Conflict was resolved by keeping the local file")
 			self.merge.ops.resolveConflictByKeepingLocal(self.conflict.number)
@@ -386,8 +363,8 @@ class ConsoleUI(urwide.Handler):
 		self.main_ui = self.ui
 		self.ui.handler(self)
 		self.ui.data.conflicts = conflicts
-		self.ui.strings.RESOLVED   = "RESOLVED   [V]iew | [U]nresolve | [Q]uit"
-		self.ui.strings.UNRESOLVED = "UNRESOLVED [V]iew | [R]esolve   | [Q]uit"
+		self.ui.strings.RESOLVED   = "RESOLVED    [U]nresolve | [V]iew | [S]ources |[Q]uit"
+		self.ui.strings.UNRESOLVED = "UNRESOLVED  [R]esolve   | [V]iew | [S]ources |[Q]uit"
 
 	def conflicts( self ):
 		"""Returns the conflicts associated with this UI."""
@@ -406,9 +383,9 @@ class ConsoleUI(urwide.Handler):
 		"""Returns a user-friendly descirption of the merge"""
 		cur, par, oth = self.conflictsInfo()
 		return INFO_TEMPLATE % (
-			cur[0],  cur[2], cur[1],
-			oth[0],  oth[2], oth[1],
-			par[0],  par[2], par[1]
+			cur[0],  cur[1], cur[2],
+			oth[0],  oth[1], oth[2],
+			par[0],  par[1], par[2]
 		)
 
 	def main( self ):
@@ -431,11 +408,11 @@ class ConsoleUI(urwide.Handler):
 	def updateConflicts( self ):
 		# Utility classes to manage the widgets
 		def clear( widget ):
-			self.main_ui._widgets[widget].remove_widgets()
+			urwide.remove_widgets(self.main_ui._widgets[widget])
 		def add( conflict, base, *args, **kwargs ):
 			widget = self.main_ui.new(*args, **kwargs)
 			self.main_ui.unwrap(widget).conflict = conflict
-			self.main_ui._widgets[base].add_widget(widget)
+			urwide.add_widget(self.main_ui._widgets[base], widget)
 			return widget
 		def finish( widget ):
 			self.main_ui._widgets[widget].set_focus(0)
@@ -529,12 +506,16 @@ class ConsoleUI(urwide.Handler):
 				self.onUnresolveConflict(conflict)
 			# Reviews what as changed
 			elif key == "v":
-				pass
 				self.ops.reviewConflict(conflict)
+			elif key == "s":
+				self.ops.reviewConflictSources(conflict)
 		else:
 			# Reviews the conflict
 			if   key == "v":
 				self.ops.reviewConflict(conflict)
+			elif key == "s":
+				self.ops.reviewConflictSources(conflict)
+			# Selects the current choice
 			# Selects the current choice
 			elif key == "enter" or key == "r":
 				group = conflict._ui_group
@@ -543,13 +524,12 @@ class ConsoleUI(urwide.Handler):
 				else:
 					self.onResolveConflict(conflict)
 				self._updateConflictView(conflict)
-			else:
-				return None
+		return True
 
 	def onKeyPress( self, widget, key ):
 		if  key == "q":
 			self.ui.end()
-			return
+			return True
 		elif key == "c":
 			if not self.ui.data.conflicts.unresolved():
 				# TODO: Detect if commit was successful or not
@@ -561,8 +541,12 @@ class ConsoleUI(urwide.Handler):
 
 	def onLeave( self, widget ):
 		self.main_ui.tooltip("Leave")
-		self.main_ui.end("Don't forget to commit your changes !")
-
+		resolved   = len(self.conflicts().resolved())
+		unresolved = len(self.conflicts().unresolved())
+		if unresolved:
+			self.main_ui.end("{0} resolved conflicts, {1} left to resolve.\nTo continue: {2} resolve ".format(resolved, unresolved, PROGRAM_NAME))
+		else:
+			self.main_ui.end("{0} resolved conflicts.\nDon't forget to commit your changes with {1} commit".format(resolved, PROGRAM_NAME))
 
 	def onCommit( self, widget ):
 		os.system("hg commit")
@@ -705,10 +689,35 @@ class Conflict:
 		d = cutpath(os.path.abspath(os.getcwd()), self.base())
 		p = self.state == self.RESOLVED and "R" or " "
 		# TODO: Add explanation for resolution (like "same as other")
-		return "%s%4s: %s -> %s (current) | %s (other) | %s (base)" % (
-			p, self.number,
-			a,b,c,d
-		)
+		s = " " * len(d.rsplit("-",1)[-1])
+		return ("%-4s\t%s %s"% ( self.number, a, p,))
+
+	def asExplanation( self ):
+		a = cutpath(os.path.abspath(os.getcwd()), self.path())
+		b = cutpath(os.path.abspath(os.getcwd()), self.current())
+		c = cutpath(os.path.abspath(os.getcwd()), self.other())
+		d = cutpath(os.path.abspath(os.getcwd()), self.base())
+		p = self.state == self.RESOLVED and "R" or " "
+		# TODO: Add explanation for resolution (like "same as other")
+		s = " " * len(d.rsplit("-",1)[-1])
+		return (
+			"   %s     ╭───● %s = yours\n"
+			"   %s ▷───│\n"
+			"   %s     ╰───◀ %s ← to merge"
+		% (
+			s, c.rsplit("-",1)[-1],
+			d.rsplit("-",1)[-1],
+			s, b.rsplit("-",1)[-1],
+		))
+
+	def asCommand( self ):
+		loc = cutpath(os.path.abspath(os.getcwd()), self.path())
+		cur = cutpath(os.path.abspath(os.getcwd()), self.current())
+		oth = cutpath(os.path.abspath(os.getcwd()), self.other())
+		bse = cutpath(os.path.abspath(os.getcwd()), self.base())
+		res = self.state == self.RESOLVED and "R" or " "
+		# TODO: Add explanation for resolution (like "same as other")
+		return mergetool.review3(cur,loc,oth,run=False)
 
 	def __str__( self ):
 		a = cutpath(os.path.abspath(os.getcwd()), self.path())
@@ -774,11 +783,14 @@ class Conflicts:
 		"""Reads the conflicts from the file, if it exists"""
 		self._conflicts = []
 		if not os.path.isfile(self._path):
-			ci, oi, pi = hg_get_merge_revisions(os.path.dirname(self._path))
+			revs       = hg_get_merge_revisions(os.path.dirname(self._path))
+			if len(revs) == 0:
+				return False
+			ci, oi, pi =  revs
 			self.setCurrentInfo(ci)
 			self.setBaseInfo(pi)
 			self.setOtherInfo(oi)
-			return
+			return True
 		f = file(self._path, "rt")
 		# We read the lines and fill in the _conflicts list
 		for line in f.readlines():
@@ -854,6 +866,7 @@ class Conflicts:
 		return conflict
 
 	def asString(self, color=False):
+		# TODO: Use join instead
 		res = ""
 		unresolved = self.unresolved()
 		resolved   = self.resolved()
@@ -864,6 +877,7 @@ class Conflicts:
 					res += format(conflict.asString(), color=RED) + "\n"
 				else:
 					res += conflict.asString() + "\n"
+				res += conflict.asCommand() + "\n"
 		# And handle resolved conflicts
 		if resolved:
 			for conflict in resolved:
@@ -931,8 +945,12 @@ class Operations:
 		base revision."""
 		if type(conflict) == int:
 			conflict = self.getUnresolvedConflict(number)
-		mergetool.review3( conflict.path(), conflict.other(), conflict.base())
-		mergetool.review3( conflict.path(), conflict.current(), conflict.base())
+		# NOTE: We don't show the ancestor in the diff3, we show both versions
+		# to be merged and the current one.
+		mergetool.review3( conflict.path(), conflict.current(), conflict.other())
+
+	def reviewConflictSources( self, conflict ):
+		mergetool.review3( conflict.current(), conflict.other(), conflict.base())
 
 	def getUnresolvedConflict( self, number ):
 		"""Returns an unresolved Conflict instance corresponding to the given
@@ -942,30 +960,29 @@ class Operations:
 		number    = int(number)
 		conflict  = conflicts.unresolved(number)
 		if not conflict:
-			self.error("No conflict found: %s" % (number))
+			self.info("No conflict found: %s" % (number))
 			return False
 		elif conflict.state == Conflict.RESOLVED:
 			self.warning("Conflict already resolved. Doing nothing.")
 			return False
 		return conflict
 
-	def resolveConflictByMerging( self, number, left="current", right="other", base="base" ):
+	def resolveConflictByMerging( self, number ):
 		"""Resolves the given conflict by merging the local file with the given
 		merge. This fires the mergetool to do
 		the merge."""
 		conflict = self.getUnresolvedConflict(number)
 		if not conflict: return
 		paths = {
-			"current":conflict.current(),
-			"base":conflict.base(),
-			"other":conflict.other()
+			"local"   :conflict.path(),
+			"current" :conflict.current(),
+			"other"   :conflict.other(),
+			"base"    :conflict.base(),
 		}
-		left, right, base = map(lambda x:paths.get(x.lower()),(left,right,base))
-		self.log("Resolving conflict", conflict.path() ,"by",
-				self.format("merging",color=BLUE,  weight=BOLD)
-		)
-		copy(left, conflict.path())
-		mergetool.merge(conflict.path(), left, right)
+		self.log("Resolving conflict", conflict.path() ,"by", self.format("merging",color=BLUE,  weight=BOLD))
+		self.info(conflict.asExplanation())
+		self.log("$ " + conflict.asCommand())
+		mergetool.merge3(paths["local"], paths["current"], paths["other"], paths["base"])
 		res = self.ask("Did you resolve the conflict (y/n) ? ")
 		if res == "y":
 			self.info("Conflict resolved")
@@ -978,9 +995,10 @@ class Operations:
 		conflict = self.getUnresolvedConflict(number)
 		if not conflict: return
 		paths = {
-			"current":conflict.current(),
-			"base":conflict.base(),
-			"other":conflict.other()
+			"local"   : conflict.local(),
+			"current" : conflict.current(),
+			"other"   : conflict.other(),
+			"base"    : conflict.base(),
 		}
 		replace_with = paths.get(replaceWith.lower())
 		if not replace_with:
@@ -1019,24 +1037,33 @@ class Operations:
 				# FIXME: Add choice of action
 				self.resolveConflict(number)
 
-	def resolveConflict( self, number ):
-		return self.resolveConflictByMerging(number)
+	def resolveConflict( self, number, method="merge" ):
+		if method == "keep":
+			return self.resolveConflictByKeepingLocal(number)
+		elif method == "merge":
+			return self.resolveConflictByMerging(number)
+		elif method == "use":
+			error("resolve use expects either 'base', 'other' 'current' or revision number")
+		else:
+			error("resolve expects a list of conflicts, or a conflict and an action")
 
 	def unresolve( self, *numbers):
 		"""Unresolve the given conflicts."""
 		conflicts = self.conflicts
 		numbers   = map(int, numbers)
-		self.warning("NOTE: Unresolving a conflict will revert your conflict"
-		+ " file back to the original state.\n"
-		+ "However, your current changes will be backed up.")
+		self.warning(
+			"NOTE: Unresolving a conflict will revert your conflict"
+			" file back to the original state. "
+			"However, your current changes will be backed up."
+		)
 		backups = []
 		for number in numbers:
-			conflict = conflicts.resolved(number)
+			conflict = conflicts.resolved(number) or conflicts.unresolved(number)
 			if not conflict:
 				self.error("No resolved conflict with id: %s" % (number))
 				continue
 			if conflict.state == Conflict.UNRESOLVED:
-				self.error("Conflict is already unresolved: %s" % (number))
+				self.info("Conflict is already unresolved: %s" % (number))
 				continue
 			res = self.ask("Do you want to unresolve conflict on %s (y/n) ? " % (conflict.path()))
 			if res == "y":
@@ -1060,15 +1087,21 @@ class Operations:
 		rootdir = self.conflicts.root
 		# If there is a conflicts file, we remove it
 		conflicts_file = os.path.join(rootdir, CONFLICTS_FILE)
-		if os.path.isfile(conflicts_file): os.unlink(conflicts_file)
+		to_clean = []
+		if os.path.isfile(conflicts_file): to_clean.append(conflicts_file)
 		# And we clean the directory
 		for root, dirs, files in os.walk(rootdir):
 			for name in files:
 				if CLEAN_MATCH.match(name):
 					path = os.path.join(root, name)
-					self.info("Cleaning up: " + cutpath(rootdir, path) )
-					os.unlink(path)
-			if ".hg" in dirs: dirs.remove(".hg")
+					to_clean.append(cutpath(rootdir, path))
+			# if ".hg" in dirs:
+			# 	dirs.remove(".hg")
+		for _ in to_clean:
+			self.info("Cleaning up: " + _)
+			os.unlink(_)
+		if len(to_clean) == 0:
+			self.info("No leftover merge files to cleanup")
 
 # -----------------------------------------------------------------------------
 #
@@ -1126,33 +1159,21 @@ def run(args):
 		return 0
 	# Command: resolve [CONFLICT...]
 	elif len(args) >= 1 and args[0] == "resolve":
-		ops  = Operations(Conflicts(root))
-		conflicts = filter(lambda c:RE_NUMBER.match(c), args[1:])
+		ops       = Operations(Conflicts(root))
+		conflicts = []
+		actions   = []
+		tool      = None
+		for i,a in enumerate(args[1:]):
+			if RE_NUMBER.match(a):
+				conflicts.append([int(a), "merge"])
+			elif a[0] == "@":
+				tool = a[1:]
+			elif a in ("keep", "base", "other", "current"):
+				conflicts[-1][1] = a
+		if tool: mergetool.set(tool)
 		# TODO: Implement this properly
-		if len(conflicts) == 1:
-			conflict = conflicts[0]
-			if   len(args) == 2:
-				ops.resolveConflictByMerging(conflict)
-			elif len(args) >= 3:
-				actions = args[2:]
-				action  = actions[0]
-				if len(actions) == 1:
-					if action == "keep":
-						ops.resolveConflictByKeepingLocal(conflict)
-					elif action == "merge":
-						ops.resolveConflictByMerging(conflict)
-					elif action == "use":
-						error("resolve use expects either 'base', 'parent' 'current' or revision number")
-					else:
-						error("resolve expects a list of conflicts, or a conflict and an action")
-				elif len(actions) == 2:
-					arg = actions[1]
-					assert None, "Not implemented"
-			else:
-				error("resolve expects a list of conflicts, or a conflict and an action")
-		else:
-			# We list the conflicts in the directory
-			ops.resolveConflicts(*conflicts)
+		for number, method in conflicts:
+			ops.resolveConflict(number, method)
 		return 0
 	# Command: unresolved CONFLICT...
 	elif len(args) >= 2 and args[0] == "unresolve":
@@ -1172,7 +1193,7 @@ def run(args):
 		return 0
 	# Command: commit
 	elif len(args) == 1 and args[0] == "commit":
-		tip	 = os.popen("hg tip").read()
+		tip	    = os.popen("hg tip").read()
 		success = os.system("hg commit")
 		success = os.popen("hg tip").read() != tip
 		# We clean the directory
@@ -1185,15 +1206,15 @@ def run(args):
 			return -1
 	# Command: CURRENT BASE OTHER (invoked by 'hg merge')
 	elif len(args) == 3:
-		info("Registering conflict")
 		# We prepare the destination paths
 		local, base, other = map(os.path.abspath, args)
+		info("Registering conflict: {0}".format(cutpath(root, local)))
 		# We print the conflict
 		cnf  = Conflicts(root)
 		ops  = Operations(cnf)
 		current_copy            = local + ".current-r" + cnf.getCurrentInfo()[0]
-		base_copy               = local + ".base-r"  + cnf.getBaseInfo()[0]
 		other_copy              = local + ".other-r"   + cnf.getOtherInfo()[0]
+		base_copy               = local + ".base-r"  + cnf.getBaseInfo()[0]
 		conflict = ops.addConflicts(local, current_copy, base_copy, other_copy)
 		print "Conflict %4d:%-40s %s" % (conflict.number,
 			cutpath(root, local), "[" + str(int(diff_count(local, other))) + "% equivalent]"
@@ -1202,19 +1223,35 @@ def run(args):
 		print "  current    ", cutpath(root, current_copy)
 		print "  other      ", cutpath(root, other_copy)
 		# We backup .orig, .base and .new that may already be tehre
-		try:
-			map(ensure_notexists, (base_copy, current_copy, other_copy))
-		except Exception:
-			error("Previous conflict files present. Please run", PROGRAM_NAME, "clean")
-			return -1
+		backups = []
+		for p,o in ((base_copy, base), (current_copy, local), (other_copy, other)):
+			if os.path.exists(p):
+				with open(p) as f: pt = f.read()
+				with open(o) as f: ot = f.read()
+				if pt != ot:
+					suffix  = 0
+					prefix  = p + ".backup"
+					path    = prefix
+					while os.path.exists(path):
+						path = prefix + suffix
+						suffix += 1
+					backups.append((p,path))
+		for o,n in backups:
+			warning("Previous conflict files present and differ, backing up {0} as {1}".format(o,n))
+			shutil.move(o, n)
 		# And we create the new ones
 		shutil.copyfile(local, current_copy)
 		shutil.copyfile(base,  base_copy)
 		shutil.copyfile(other, other_copy)
 		map(lambda p:os.chmod(p, stat.S_IREAD|stat.S_IRUSR|stat.S_IRGRP),
 		(current_copy, base_copy, other_copy))
-		print
-		#info("You can resolve conflicts with:", PROGRAM_NAME, "resolve 0 (keep|update|merge)")
+		info(
+			"You can:\n"
+			"- resolve conflicts   :", PROGRAM_NAME, "resolve N (keep|update|merge)\n"
+			"- unresolve conflicts :", PROGRAM_NAME, "unresolve N‥\n"
+			"- list conflicts      :", PROGRAM_NAME, "list\n"
+			"- commit your merge   :", PROGRAM_NAME, "commit"
+		)
 		return 0
 	else:
 		print USAGE

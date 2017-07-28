@@ -12,6 +12,8 @@
 
 # TODO: Add async support
 
+# FIXME: There's some thinking to be done about how to best merge files
+
 import os, popen2
 MERGETOOL = None
 
@@ -33,33 +35,45 @@ The supported merge applications are:
 """
 
 FILEMERGE = {
-	"APP"     :"opendiff",
+	"APP"     : "opendiff",
 
-	"REVIEW"  :"$0 '$1' '$2'",
-	"REVIEW3" :"$0 '$1' '$2' -ancestor '$3'",
-
-	"MERGE"   :"$0 '$2' '$3' -merge '$1' ",
-	"MERGE3"  :"$0 '$2' '$3' -ancestor '$4' -merge '$1'"
+	"REVIEW"  : "{app} {current} {other} {base}",
+	"REVIEW3" : "{current} {other} -ancestor {base}",
+	"MERGE"   : "{app} {current} {other} -merge {local}",
+	"MERGE3"  : "{app} {current} {other} -ancestor {base} -merge {local}"
 
 }
 
 GVIMDIFF = {
 	"APP"     : "gvimdiff",
+	"REVIEW"  : "{app} {current} {other} {base}",
+	"REVIEW3" : "{app} -f {current} {other} {base}",
+	"MERGE"   : "{app} {current} {local} {other}",
+	"MERGE3"  : "{app} {current} {local} {other}"
+}
 
-	"REVIEW"  : "$0 '$1' '$2'  "
-	,
+MELD = {
+	"APP"     : "meld",
+	"REVIEW"  : "{app} {current} {other} {base}",
+	"REVIEW3" : "{app} {current} {other} {base}",
+	"MERGE"   : "{app} {current} {local} {other}",
+	"MERGE3"  : "{app} {current} {local} {other}"
+}
 
-	"REVIEW3"   : "$0 -f '$1' '$2' '$3' " \
-	,
-
-	"MERGE"  : "$0 '$1' '$3'  " \
-	,
-
-	"MERGE3"  : "$0 '$1' '$3' '$4' " \
-
+TOOLS = {
+	"fm"       : FILEMERGE,
+	"filemerge": FILEMERGE,
+	"gvimdiff" : GVIMDIFF,
+	"vim"      : GVIMDIFF,
+	"meld"     : MELD,
 }
 
 MERGETOOL = None
+
+SHELL_ESCAPE            = " '\";`|"
+def shell_safe( path ):
+	"""Makes sure that the given path/string is escaped and safe for shell"""
+	return "".join([("\\" + _) if _ in SHELL_ESCAPE else _ for _ in path])
 
 def popen(command):
 	# FIXME: popen3[1] does not give the same results as popen !!
@@ -74,50 +88,71 @@ def which(program):
 	res = not res.startswith("no ")
 	return res
 
-def detectMergeTool():
-	"""Detects the mergetool for this platform."""
+def has(name):
+	return name in TOOLS
+
+def set(name):
 	global MERGETOOL
-	if MERGETOOL != None: return MERGETOOL
-	#if os.environ.has_key("MERGETOOL"):
-	#	MERGETOOL = os.environ.get("MERGETOOL")
-	#	return
-	has_gvim    = which(GVIMDIFF["APP"])
-	has_fm      = which(FILEMERGE["APP"])
-	if  has_gvim:
-		MERGETOOL = GVIMDIFF
-	elif has_fm:
-		MERGETOOL = FILEMERGE
-	else:
-		raise Exception(
-			"No file merging utility. Please set the MERGETOOL variable\n"
-			+ HELP
-		)
+	MERGETOOL = get(name)
 	return MERGETOOL
 
-def _format( line, *args ):
+def get(name=None):
+	"""Detects the mergetool for this platform."""
+	global MERGETOOL
+	if name:
+		return TOOLS[name]
+	else:
+		if MERGETOOL != None: return MERGETOOL
+		if os.environ.has_key("MERGETOOL"):
+			MERGETOOL = os.environ.get("MERGETOOL")
+			return MERGETOOL
+		else:
+			has_gvim    = which(GVIMDIFF["APP"])
+			has_fm      = which(FILEMERGE["APP"])
+			if  has_gvim:
+				MERGETOOL = GVIMDIFF
+			elif has_fm:
+				MERGETOOL = FILEMERGE
+			else:
+				raise Exception(
+					"No file merging utility. Please set the MERGETOOL variable\n"
+					+ HELP
+				)
+	return MERGETOOL
+
+def _format( line, app=None, local=None, current=None, other=None, base=None ):
 	"""Replaces '$0', '$1', '$2', ... occurences in 'line' with elements of
 	args."""
-	for i in range(len(args)):
-		line = line.replace("$%d" % (i), args[i])
-	return line
+	m = {}
+	if app:     m["app"]     = app
+	if local:   m["local"]   = shell_safe(local)
+	if current: m["current"] = shell_safe(current)
+	if other  : m["other"]   = shell_safe(other)
+	if base   : m["base"]    = shell_safe(base)
+	print ("FORMAT", line, m)
+	print "==", line.format(**m)
+	return line.format(**m)
 
-def _do( command, *args ):
-	tool    = detectMergeTool()
-	_args   = [tool["APP"]]
-	_args.extend(args)
-	program = _format(tool[command.upper()], *_args)
-	return os.popen(program +" &").read()
+def _do( command, local=None, current=None, other=None, base=None ):
+	return os.popen(_cmd(command, local=local, current=current, other=other, base=base) +" &").read()
 
-def review( current, other ):
-	return _do("review", current, other)
+def _cmd( command, local=None, current=None, other=None, base=None ):
+	tool    = get()
+	app     = tool["APP"]
+	assert app, "Missing APP entry in tool: {0}".format(tool)
+	return _format(tool[command.upper()], app=app, local=local, current=current, other=other, base=base)
 
-def review3( current, other, base ):
-	return _do("review3", current, other, base)
+# FIXME: This should be local, current, other, base
+def review( current, other, run=True ):
+	return (_do if run else _cmd)("review", current=current, other=other)
 
-def merge( destination, current, other ):
-	return _do("merge", destination, current, other)
+def review3( current, other, base, run=True ):
+	return (_do if run else _cmd)("review3", current=current, other=other, base=base)
 
-def merge3( destination, current, other, base ):
-	return _do("merge3", destination, current, other, base)
+def merge( destination, current, other, run=True ):
+	return (_do if run else _cmd)("merge", local=destination, current=current, other=other)
+
+def merge3( destination, current, other, base, run=True ):
+	return (_do if run else _cmd)("merge3", local=destination, current=current, other=other, base=base)
 
 # EOF - vim: tw=80 ts=4 sw=4 noet
