@@ -446,20 +446,23 @@ def commit_wrapper(repo, message, user, date, match, **kwargs):
 	if not match:
 		match = mercurial.localrepo.always(repo.root, '')
 
-	for change in repo.changelog:
-		ch, ad, rm, dt, un, ig, cl = repo.status(change)
-		changed += ch
-		added   += ad
-		deleted += ad
-		removed += rm
-		ignored += ig
-		cleaned += cl
+	ch, ad, rm, dt, un, ig, cl = repo.status()
+	changed += ch
+	added   += ad
+	deleted += ad
+	removed += rm
+	ignored += ig
+	cleaned += cl
 
 	# We create a commit object that sums up the information
 	commit_object = Commit(repo)
 	for c in changed: commit_object.events.append(ChangeEvent(commit_object, c))
 	for c in added:   commit_object.events.append(AddEvent(commit_object, c))
 	for c in removed: commit_object.events.append(RemoveEvent(commit_object, c))
+
+	if len(commit_object.events) == 0:
+		# info("Nothing to commit")
+		return
 
 	# And we invoke the commit editor
 	app = ConsoleUI()
