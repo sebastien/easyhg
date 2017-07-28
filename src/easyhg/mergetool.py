@@ -129,8 +129,6 @@ def _format( line, app=None, local=None, current=None, other=None, base=None ):
 	if current: m["current"] = shell_safe(current)
 	if other  : m["other"]   = shell_safe(other)
 	if base   : m["base"]    = shell_safe(base)
-	print ("FORMAT", line, m)
-	print "==", line.format(**m)
 	return line.format(**m)
 
 def _do( command, local=None, current=None, other=None, base=None ):
