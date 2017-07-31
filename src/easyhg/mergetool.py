@@ -7,7 +7,7 @@
 # Author    : Sebastien Pierre                           <sebastien@type-z.org>
 # -----------------------------------------------------------------------------
 # Creation  : 09-Jul-2007
-# Last mod  : 27-Jul-2007
+# Last mod  : 31-Aug-2017
 # -----------------------------------------------------------------------------
 
 # TODO: Add async support
@@ -37,7 +37,7 @@ The supported merge applications are:
 FILEMERGE = {
 	"APP"     : "opendiff",
 
-	"REVIEW"  : "{app} {current} {other} {base}",
+	"REVIEW"  : "{app} {current} {other}",
 	"REVIEW3" : "{current} {other} -ancestor {base}",
 	"MERGE"   : "{app} {current} {other} -merge {local}",
 	"MERGE3"  : "{app} {current} {other} -ancestor {base} -merge {local}"
@@ -46,7 +46,7 @@ FILEMERGE = {
 
 GVIMDIFF = {
 	"APP"     : "gvimdiff",
-	"REVIEW"  : "{app} {current} {other} {base}",
+	"REVIEW"  : "{app} {current} {other}",
 	"REVIEW3" : "{app} -f {current} {other} {base}",
 	"MERGE"   : "{app} {current} {local} {other}",
 	"MERGE3"  : "{app} {current} {local} {other}"
@@ -54,11 +54,28 @@ GVIMDIFF = {
 
 MELD = {
 	"APP"     : "meld",
-	"REVIEW"  : "{app} {current} {other} {base}",
+	"REVIEW"  : "{app} {current} {other}",
 	"REVIEW3" : "{app} {current} {other} {base}",
 	"MERGE"   : "{app} {current} {local} {other}",
 	"MERGE3"  : "{app} {current} {local} {other}"
 }
+
+DIFFUSE = {
+	"APP"     : "diffuse",
+	"REVIEW"  : "{app} {current} {other}",
+	"REVIEW3" : "{app} {current} {other} {base}",
+	"MERGE"   : "{app} {current} {local} {other}",
+	"MERGE3"  : "{app} {current} {local} {other}"
+}
+
+KDIFF3 = {
+	"APP"     : "kdiff3",
+	"REVIEW"  : "{app} {current} {other}",
+	"REVIEW3" : "{app} {current} {other} {base}",
+	"MERGE"   : "{app} {current} {local} {other}",
+	"MERGE3"  : "{app} {current} {local} {other}"
+}
+
 
 TOOLS = {
 	"fm"       : FILEMERGE,
@@ -66,6 +83,9 @@ TOOLS = {
 	"gvimdiff" : GVIMDIFF,
 	"vim"      : GVIMDIFF,
 	"meld"     : MELD,
+	"diffuse"  : DIFFUSE,
+	"kdiff"    : KDIFF3,
+	"kdiff3"   : KDIFF3,
 }
 
 MERGETOOL = None

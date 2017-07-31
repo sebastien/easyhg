@@ -136,7 +136,7 @@ def diff_count( a, b ):
 #
 # -----------------------------------------------------------------------------
 
-CONSOLE_STYLE = """\
+CONSOLE_STYLE = u"""\
 Frame         : WH, DB, SO
 header        : WH, DC, BO
 footer        : WH, DB, SO
@@ -169,7 +169,7 @@ header        : BL, Lg, BO
 Hdr           : BL, Lg, BO
 """
 
-CONSOLE_UI = """\
+CONSOLE_UI = u"""\
 Hdr MERCURIAL - Easymerge %s
 
 Txt  Merging  ○ CURRENT(theirs) + ● OTHER(yours) = ◌ LOCAL
@@ -202,7 +202,7 @@ GFl
 End
 """ % (__version__)
 
-DLG_RESOLVE = """\
+DLG_RESOLVE = u"""\
 
 Hdr
 Hdr  RESOLVE CONFLICT
@@ -284,7 +284,7 @@ GFl
 End
 """
 
-INFO_TEMPLATE = """\
+INFO_TEMPLATE = u"""\
   ◌┄┄┄╮  LOCAL
   │   │
   ○   │  CURRENT  R%-3s by %s on %s
@@ -363,8 +363,8 @@ class ConsoleUI(urwide.Handler):
 		self.main_ui = self.ui
 		self.ui.handler(self)
 		self.ui.data.conflicts = conflicts
-		self.ui.strings.RESOLVED   = "RESOLVED    [U]nresolve | [V]iew | [S]ources |[Q]uit"
-		self.ui.strings.UNRESOLVED = "UNRESOLVED  [R]esolve   | [V]iew | [S]ources |[Q]uit"
+		self.ui.strings.RESOLVED   = "RESOLVED    [U]nresolve | Re[V]iew | Diff: [C]urrent, [O]ther | [S]ources | [Q]uit"
+		self.ui.strings.UNRESOLVED = "UNRESOLVED  [R]esolve   | Re[V]iew | Diff: [C]urrent, [O]ther | [S]ources | [Q]uit"
 
 	def conflicts( self ):
 		"""Returns the conflicts associated with this UI."""
@@ -507,12 +507,20 @@ class ConsoleUI(urwide.Handler):
 			# Reviews what as changed
 			elif key == "v":
 				self.ops.reviewConflict(conflict)
+			elif key == "o":
+				self.ops.reviewConflict(conflict, "local", "other")
+			elif key == "c":
+				self.ops.reviewConflict(conflict, "local", "current")
 			elif key == "s":
 				self.ops.reviewConflictSources(conflict)
 		else:
 			# Reviews the conflict
 			if   key == "v":
 				self.ops.reviewConflict(conflict)
+			elif key == "o":
+				self.ops.reviewConflict(conflict, "local", "other")
+			elif key == "c":
+				self.ops.reviewConflict(conflict, "local", "current")
 			elif key == "s":
 				self.ops.reviewConflictSources(conflict)
 			# Selects the current choice
@@ -566,7 +574,7 @@ class ConsoleUI(urwide.Handler):
 		return format(message, **kwargs)
 
 	def log( self, *args ):
-		self.main_ui.info(" ".join(map(str, args)))
+		self.main_ui.info(u" ".join(u"{0}".format(_) for _ in args))
 		self.main_ui.draw()
 
 # -----------------------------------------------------------------------------
@@ -586,13 +594,13 @@ class Conflict:
 	state=None, description="", provisional=False ):
 		if not state: state = Conflict.UNRESOLVED
 		assert type(number) == int
-		self.conflicts = None
-		self.provisional = provisional
-		self.number = number
-		self.state  = state
-		self._path  = path
+		self.conflicts    = None
+		self.provisional  = provisional
+		self.number       = number
+		self.state        = state
+		self._path        = path
 		self._currentPath = currentPath
-		self._basePath  = basePath
+		self._basePath    = basePath
 		self._otherPath   = otherPath
 		self.description  = description
 
@@ -666,6 +674,8 @@ class Conflict:
 
 	def describe( self ):
 		l,c,b,o = self._sigs()
+		if not self.conflicts:
+			return "Error: no conflicts registered/found"
 		if l == c:
 			return "No modifications (R%s)" % (self.conflicts.getCurrentInfo()[0])
 		elif l == b:
@@ -695,6 +705,13 @@ class Conflict:
 
 	def other( self ):
 		return self._otherPath
+
+	def get( self, path ):
+		if path == "current": return self.current()
+		if path == "local":   return self.path()
+		if path == "base":    return self.base()
+		if path == "other":   return self.other()
+		raise Exception("Unknown path type: {0}".format(path))
 
 	def nextMerge(self):
 		number = 0
@@ -861,6 +878,8 @@ class Conflicts:
 				self.setBaseInfo   (revs[2])
 				self._conflicts = [_.provision(revs[0], revs[1], revs[2]) for _ in self._conflicts]
 				self.save()
+			for c in self._conflicts:
+				c.conflicts = self
 
 	def save( self ):
 		"""Writes back the conflicts to the file, overwriting it."""
@@ -1011,14 +1030,21 @@ class Operations:
 		"""Lists the conflicts in the given directory."""
 		self.output(self.conflicts.asString(self.color))
 
-	def reviewConflict( self, conflict ):
+	def reviewConflict( self, conflict, *args ):
 		"""Reviews the given conflict, by comparing its current revision to the
 		base revision."""
 		if type(conflict) == int:
 			conflict = self.getUnresolvedConflict(number)
-		# NOTE: We don't show the ancestor in the diff3, we show both versions
-		# to be merged and the current one.
-		mergetool.review3( conflict.path(), conflict.current(), conflict.other())
+		if len(args) == 0:
+			# NOTE: We don't show the ancestor in the diff3, we show both versions
+			# to be merged and the current one.
+			mergetool.review3( conflict.path(), conflict.current(), conflict.other())
+		elif len(args) == 2:
+			mergetool.review( *[conflict.get(_) for _ in args] )
+		elif len(args) == 3:
+			mergetool.review3( *[conflict.get(_) for _ in args] )
+		else:
+			error ("Unsupported number or arugments: {0}".format(args))
 
 	def reviewConflictSources( self, conflict ):
 		mergetool.review3( conflict.current(), conflict.other(), conflict.base())

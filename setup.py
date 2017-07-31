@@ -1,6 +1,5 @@
 #!/usr/bin/env python
-# Encoding: iso-8859-1
-# vim: tw=80 ts=4 sw=4 noet
+# encoding: utf8
 # -----------------------------------------------------------------------------
 # Project   : Mercurial-Easy
 # -----------------------------------------------------------------------------
@@ -11,7 +10,7 @@
 # Last mod  : 09-Feb-2007
 # -----------------------------------------------------------------------------
 
-import sys ; sys.path.insert(0, "Sources")
+import sys ; sys.path.insert(0, "src")
 from distutils.core import setup
 
 SUMMARY     = "A collection of tools to make Mercurial (even more) user friendly"
@@ -27,10 +26,10 @@ URWID command-line GUI library, which is embedded in this package.
 # ------------------------------------------------------------------------------
 
 setup(
-    name         = "Mercurial-Easy",
+    name         = "easyhg",
     version      = "0.9.4",
 
-    author       = "Sebastien Pierre", author_email = "sebastien@ivy.fr",
+    author       = "Sebastien Pierre", author_email = "sebastien.pierre@gmail.com",
     description   = SUMMARY, long_description  = DESCRIPTION,
     license      = "Revised BSD License",
     keywords     = "Mercurial, dvcs, scm, tool, interface, gui, command-line",
@@ -39,7 +38,7 @@ setup(
     modules_dir  = { "": "Sources" },
     packages     = ["easyhg","urwid"],
     py_modules      = ["urwide"],
-    scripts      = ["Sources/easyhg/easymerge.py"]
+    scripts      = ["bin/easymerge"]
 )
 
-# EOF
+# EOF - vim: tw=80 ts=4 sw=4 noet
