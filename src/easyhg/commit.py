@@ -167,7 +167,7 @@ class ConsoleUIHandler(urwide.Handler):
 	def onSumUp( self, widget, key ):
 		if hasattr(widget, "_alreadyEdited"): return False
 		if key in ("left", "right", "up", "down", "tab", "shift tab"): return False
-		widget.set_edit_text("")
+		widget.set_edit_text("" + (key if len(key) == 1 else ""))
 		widget._alreadyEdited = True
 
 	def onScope( self, widget, key ):
