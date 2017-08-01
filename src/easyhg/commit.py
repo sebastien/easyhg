@@ -10,7 +10,7 @@
 # Last mod  : 22-Jan-2017
 # -----------------------------------------------------------------------------
 
-import sys, os, re, time, stat, tempfile
+import sys, os, re, time, stat, tempfile, json
 import easyhg.mergetool as mergetool
 from   copy import copy
 from   fnmatch import fnmatch
@@ -22,6 +22,7 @@ import mercurial.commands
 import mercurial.localrepo
 from easyhg.output import *
 
+# TODO: Support --amend
 # FIX for 0.9.4 version of Mercurial
 try:
 	from mercurial import demandimport
@@ -116,9 +117,10 @@ class ConsoleUI:
 
 	def main( self, commit = None ):
 		self.ui.create(CONSOLE_STYLE, CONSOLE_UI)
-		self.ui.DEFAULT_SUMMARY     = self.ui.widgets.edit_summary.get_edit_text()
-		self.ui.DEFAULT_DESCRIPTION = self.ui.widgets.edit_desc.get_edit_text()
-		self.ui.DEFAULT_SCOPE       = self.ui.widgets.edit_scope.get_edit_text()
+		message = (commit.load() if commit else {}) or {}
+		self.ui.DEFAULT_SUMMARY     = message.get("summary")     or self.ui.widgets.edit_summary.get_edit_text()
+		self.ui.DEFAULT_DESCRIPTION = message.get("description") or self.ui.widgets.edit_desc.get_edit_text()
+		self.ui.DEFAULT_SCOPE       = message.get("scope")       or self.ui.widgets.edit_scope.get_edit_text()
 		self.ui.data.commit = commit
 		if commit:
 			if commit.changed(".hgsub*") or commit.added(".hgsub*"):
@@ -129,7 +131,7 @@ class ConsoleUI:
 	def selectedChanges(self):
 		return self.defaultHandler.selectedChanges()
 
-	def commitMessage( self ):
+	def commitMessage( self, json=False ):
 		summ  = self.ui.widgets.edit_summary.get_edit_text()
 		scope = self.ui.widgets.edit_scope.get_edit_text()
 		tags  = self.ui.widgets.edit_tags.get_edit_text()
@@ -137,15 +139,25 @@ class ConsoleUI:
 		if scope.startswith("‥"): scope = ""
 		if desc.startswith("‥"):  desc  = ""
 		if tags:
-			tags = "".join("[{0}]".format(_.strip()) for _ in tags.split() if _.strip)
-		msg = "{0} {1}{2}{3}".format(
-			tags,
-			scope + ": " if scope else "",
-			summ,
-			"\n\n" + desc if desc else ""
-		)
-		while msg.find("\n\n") != -1: msg = msg.replace("\n\n", "\n")
-		return msg
+			tags = [_.strip() for _ in tags.split() if _.strip]
+		if json:
+			return dict(
+				summary     = summ,
+				scope       = scope,
+				tags        = tags,
+				description = desc
+			)
+		else:
+			if tags:
+				tags = "".join("[{0}]".format(_) for _ in tags)
+			msg = "{0} {1}{2}{3}".format(
+				tags,
+				scope + ": " if scope else "",
+				summ,
+				"\n\n" + desc if desc else ""
+			)
+			while msg.find("\n\n") != -1: msg = msg.replace("\n\n", "\n")
+			return msg
 
 	def commitUser( self ):
 		return self.ui.widgets.edit_user.get_edit_text()
@@ -300,8 +312,36 @@ class Commit:
 	"""A Commit object contains useful information about a Mercurial commit."""
 
 	def __init__( self, repo ):
-		self.events = []
-		self.repo   = repo
+		self.events  = []
+		self.repo    = repo
+
+	def load( self, path=".hgcommit" ):
+		if os.path.exists(path):
+			rev = self.current()
+			with open(path) as f:
+				try:
+					message = json.load(f)
+					if "rev" in message and message.get("rev") != rev:
+						message = None
+				except ValueError as e:
+					message = None
+			if not message:
+				os.unlink(path)
+			return message
+		else:
+			return None
+
+	def save( self, scope=None, tags=None, summary=None, description=None, path=".hgcommit"):
+		message = {
+			"scope":scope,
+			"tags":tags,
+			"description":description,
+			"summary":summary,
+			"rev":self.current(),
+			}
+		with open(path, "w") as f:
+			json.dump(message, f)
+		return message
 
 	def changed( self, match=None ):
 		return [_ for _ in self.events if isinstance(_, ChangeEvent) and _.match(match)]
@@ -328,6 +368,9 @@ class Commit:
 		"""Returns the local parent revision number."""
 		parent = self.hg("parent").split("\n")[0].split(":")[1].strip()
 		return parent
+
+	def current(self):
+		return self.hg("id").split("\n")[0].split(" ")[0].strip()
 
 	def __str__( self ):
 		return str(self.events)
@@ -443,6 +486,18 @@ def commit_wrapper(repo, message, user, date, match, **kwargs):
 	ignored   = []
 	cleaned   = []
 
+	hgsub = os.path.join(repo.root, ".hgsub")
+	if os.path.exists(hgsub):
+		with open(hgsub) as f:
+			for sub in f.readlines():
+				sub = sub.split("=",1)[0].strip()
+				if not sub: continue
+				subid = os.popen("hg id -n --repository '{0}'".format(sub)).read().split("\n")[0]
+				if subid.endswith("+"):
+					error("Subrepository has uncommited changed: {0}".format(sub))
+					info("run: hg easycommit --repository {0}".format(sub))
+					return None
+
 	if not match:
 		match = mercurial.localrepo.always(repo.root, '')
 
@@ -482,6 +537,7 @@ def commit_wrapper(repo, message, user, date, match, **kwargs):
 		user     = app.commitUser()
 		kwargs   = copy(kwargs)
 		kwargs["editor"] = None
+		commit_object.save(**app.commitMessage(json=True))
 	return repo._old_commit( message, user, date, match, **kwargs )
 
 def command_defaults(ui, cmd):
