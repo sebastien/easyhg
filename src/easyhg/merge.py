@@ -872,7 +872,7 @@ class Conflicts:
 				Conflict.fromJSON(_) for _ in data["conflicts"]
 			]
 			# If we have no base then we need to expand the conflicts now
-			if data["base"] is None:
+			if data["base"] is None and len(revs) >= 3:
 				self.setCurrentInfo(revs[0])
 				self.setOtherInfo  (revs[1])
 				self.setBaseInfo   (revs[2])
@@ -1225,10 +1225,10 @@ def hg_get_revision_info(rev, path="."):
 def hg_get_merge_revisions(path="."):
 	"""Returns a tuple (CURRENT, PARENT, OTHER) where each value is a couple
 	(REV, CHANGESET ID)."""
-	lines = os.popen("hg --repository {0} id -n".format(path)).read().split("\n")
+	lines = os.popen("hg --repository {0} id -n".format(path)).read().decode("utf8").split("\n")
 	revs  = [_ for _ in lines[0].split("+") if _]
 	if len(revs) >= 2:
-		ancestor = os.popen( "hg --repository {0} id -n -r'ancestor({1},{2})'".format(path, revs[0], revs[1])).read()
+		ancestor = os.popen( "hg --repository {0} id -n -r'ancestor({1},{2})'".format(path, revs[0], revs[1])).read().decode("utf8")
 		revs.append(ancestor.split("\n")[0])
 	res   = []
 	for rev in revs:
