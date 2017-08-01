@@ -23,6 +23,7 @@ import mercurial.localrepo
 from easyhg.output import *
 
 # TODO: Support --amend
+# FIXME: When .hgsubstate has changed
 # FIX for 0.9.4 version of Mercurial
 try:
 	from mercurial import demandimport
@@ -123,8 +124,8 @@ class ConsoleUI:
 		self.ui.DEFAULT_SCOPE       = message.get("scope")       or self.ui.widgets.edit_scope.get_edit_text()
 		self.ui.data.commit = commit
 		if commit:
-			if commit.changed(".hgsub*") or commit.added(".hgsub*"):
-				self.ui.widgets.edit_scope.set_edit_text("Submodules")
+			if commit.changed(".hgsub*") or commit.added(".hgsub*") or commit.empty():
+				self.ui.widgets.edit_tags.set_edit_text("Submodules")
 			self.defaultHandler.updateCommitFiles()
 		return self.ui.main()
 
@@ -352,6 +353,9 @@ class Commit:
 	def added( self, match=None ):
 		return [_ for _ in self.events if isinstance(_, AddEvent) and _.match(match)]
 
+	def empty( self ):
+		return len(self.events) == 0
+
 	def commandInRepo( self, command ):
 		"""Executes the given command within the repository, and returns its
 		result."""
@@ -490,6 +494,7 @@ def commit_wrapper(repo, message, user, date, match, **kwargs):
 	if os.path.exists(hgsub):
 		with open(hgsub) as f:
 			for sub in f.readlines():
+				if sub.strip().startswith("#"): continue
 				sub = sub.split("=",1)[0].strip()
 				if not sub: continue
 				subid = os.popen("hg id -n --repository '{0}'".format(sub)).read().split("\n")[0]
@@ -497,11 +502,19 @@ def commit_wrapper(repo, message, user, date, match, **kwargs):
 					error("Subrepository has uncommited changed: {0}".format(sub))
 					info("run: hg easycommit --repository {0}".format(sub))
 					return None
+				else:
+					info("Subrepository has not changed: {0}".format(sub))
 
 	if not match:
 		match = mercurial.localrepo.always(repo.root, '')
 
-	ch, ad, rm, dt, un, ig, cl = repo.status()
+	rev = os.popen("hg id -n --repository '{0}'".format(repo.root)).read().split("\n")[0].split(" ")[0]
+
+	if rev[-1] != "+":
+		return None
+
+	changes = repo.changectx(rev.replace("+", ""))
+	ch, ad, rm, dt, un, ig, cl = changes.status()
 	changed += ch
 	added   += ad
 	deleted += ad
@@ -514,10 +527,6 @@ def commit_wrapper(repo, message, user, date, match, **kwargs):
 	for c in changed: commit_object.events.append(ChangeEvent(commit_object, c))
 	for c in added:   commit_object.events.append(AddEvent(commit_object, c))
 	for c in removed: commit_object.events.append(RemoveEvent(commit_object, c))
-
-	if len(commit_object.events) == 0:
-		# info("Nothing to commit")
-		return
 
 	# And we invoke the commit editor
 	app = ConsoleUI()
