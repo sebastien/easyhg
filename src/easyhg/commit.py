@@ -16,9 +16,9 @@ from   copy import copy
 from   fnmatch import fnmatch
 import urwide, urwid
 from   mercurial.i18n import gettext as _
-from   mercurial.match import match
-import mercurial
+import mercurial.match
 import mercurial.commands
+import mercurial.cmdutil
 import mercurial.localrepo
 from easyhg.output import *
 
@@ -52,6 +52,8 @@ DEFAULT_TAGS  = [
 	"Refactor",
 	"Fix",
 	"WIP"
+	"Merge",
+	"Submodules",
 ]
 
 CONSOLE_STYLE = """\
@@ -122,6 +124,8 @@ class ConsoleUI:
 		self.ui.DEFAULT_SUMMARY     = message.get("summary")     or self.ui.widgets.edit_summary.get_edit_text()
 		self.ui.DEFAULT_DESCRIPTION = message.get("description") or self.ui.widgets.edit_desc.get_edit_text()
 		self.ui.DEFAULT_SCOPE       = message.get("scope")       or self.ui.widgets.edit_scope.get_edit_text()
+		if commit and len(commit.revs) > 1:
+			self.ui.DEFAULT_TAGS = "[Merge]"
 		self.ui.data.commit = commit
 		if commit:
 			if commit.changed(".hgsub*") or commit.added(".hgsub*") or commit.empty():
@@ -312,9 +316,10 @@ class ConsoleUIHandler(urwide.Handler):
 class Commit:
 	"""A Commit object contains useful information about a Mercurial commit."""
 
-	def __init__( self, repo ):
+	def __init__( self, repo, revs=None ):
 		self.events  = []
 		self.repo    = repo
+		self.revs    = revs
 
 	def load( self, path=".hgcommit" ):
 		if os.path.exists(path):
@@ -374,7 +379,7 @@ class Commit:
 		return parent
 
 	def current(self):
-		return self.hg("id").split("\n")[0].split(" ")[0].strip()
+		return self.revs
 
 	def __str__( self ):
 		return str(self.events)
@@ -473,6 +478,7 @@ class RemoveEvent( Event ):
 # ------------------------------------------------------------------------------
 
 USERNAME = None
+OPTIONS  = None
 
 def commit_wrapper(repo, message, user, date, match, **kwargs):
 	"""Replacement for the localrepository commit that intercepts the list of
@@ -505,15 +511,13 @@ def commit_wrapper(repo, message, user, date, match, **kwargs):
 				else:
 					info("Subrepository has not changed: {0}".format(sub))
 
-	if not match:
-		match = mercurial.localrepo.always(repo.root, '')
-
 	rev = os.popen("hg id -n --repository '{0}'".format(repo.root)).read().split("\n")[0].split(" ")[0]
+	revs = ["tip" if _ == "-1" else _ for _ in rev.split("+") if _.strip]
 
 	if rev[-1] != "+":
 		return None
 
-	changes = repo.changectx(rev.replace("+", ""))
+	changes = repo.changectx(revs[0])
 	ch, ad, rm, dt, un, ig, cl = changes.status()
 	changed += ch
 	added   += ad
@@ -523,7 +527,7 @@ def commit_wrapper(repo, message, user, date, match, **kwargs):
 	cleaned += cl
 
 	# We create a commit object that sums up the information
-	commit_object = Commit(repo)
+	commit_object = Commit(repo, revs=revs)
 	for c in changed: commit_object.events.append(ChangeEvent(commit_object, c))
 	for c in added:   commit_object.events.append(AddEvent(commit_object, c))
 	for c in removed: commit_object.events.append(RemoveEvent(commit_object, c))
@@ -540,31 +544,20 @@ def commit_wrapper(repo, message, user, date, match, **kwargs):
 	# Now we execute the old commit method
 	if files:
 		if len(files) != len(commit_object.events):
-			match._files  = files
-			match._always = False
+			match = mercurial.match.match(repo.root, repo.root, patterns=files,exact=True)
 		message  = app.commitMessage()
 		user     = app.commitUser()
 		kwargs   = copy(kwargs)
 		kwargs["editor"] = None
 		commit_object.save(**app.commitMessage(json=True))
+	# FIXME: For some reason that does not work for amend
 	return repo._old_commit( message, user, date, match, **kwargs )
 
 def command_defaults(ui, cmd):
 	"""Returns the default option values for the given Mercurial command. This
 	was taken from the Tailor conversion script."""
-	import mercurial.commands
-	# Mercurial 0.9.1
-	if hasattr(mercurial.commands, 'find'):
-		findcmd = mercurial.commands.find
-	# Mercurial 0.9.3
-	elif hasattr(mercurial.commands, 'findcmd'):
-		findcmd = mercurial.commands.findcmd
-	# Mercurial 0.9.4
-	else:
-		import mercurial.cmdutil
-		findcmd = mercurial.cmdutil.findcmd
-	return {}
-	return dict([(f[1].replace('-', '_'), f[2]) for f in findcmd(cmd, ui)[1][1]])
+	defaults = mercurial.cmdutil.findcmd(cmd, mercurial.commands.table)
+	return dict([(f[1].replace('-', '_'), f[2]) for f in defaults[1][1]])
 
 def _commit( ui, repo, *args, **opts ):
 	"""This is the main function that is called by the 'hg' commands (actually
@@ -572,6 +565,7 @@ def _commit( ui, repo, *args, **opts ):
 	# Here we swap the default commit implementation with ours
 	commit_message = opts.get("message")
 	global USERNAME ; USERNAME = ui.username()
+	global OPTIONS
 	if not commit_message:
 		repo_old_commit            = repo.__class__.commit
 		repo.__class__.commit      = commit_wrapper
@@ -582,6 +576,7 @@ def _commit( ui, repo, *args, **opts ):
 			if not opts.has_key(key): opts[key] = value
 		# Restores the commit implementation
 		new_opts['cmdoptions'] = new_opts
+		OPTIONS = new_opts
 		# Invokes the 'normal' mercurial commit
 		mercurial.commands.commit(ui, repo, *args, **new_opts)
 		repo.__class__.commit  = repo_old_commit
