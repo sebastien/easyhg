@@ -76,6 +76,13 @@ KDIFF3 = {
 	"MERGE3"  : "{app} {current} {local} {other}"
 }
 
+TKDIFF = {
+	"APP"     : "tkdiff",
+	"REVIEW"  : "{app} {current} {other}",
+	"REVIEW3" : "{app} -a {base} {current} {other}",
+	"MERGE"   : "{app} -o {local} {current} {other}",
+	"MERGE3"  : "{app} -a {base} -o {local}  {current} {other}"
+}
 
 TOOLS = {
 	"fm"       : FILEMERGE,
@@ -86,6 +93,7 @@ TOOLS = {
 	"diffuse"  : DIFFUSE,
 	"kdiff"    : KDIFF3,
 	"kdiff3"   : KDIFF3,
+	"tkdiff"   : TKDIFF,
 }
 
 MERGETOOL = None
