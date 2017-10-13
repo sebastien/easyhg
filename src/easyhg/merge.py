@@ -215,8 +215,8 @@ Chc [X:R] Merge ○ R%-3s CURRENT and ● R%-3s OTHER
 
 Txt Choose
 
-Chc [ :R] Use ○ R%-3s (theirs/current)
-Chc [ :R] Use ● R%-3s (yours/other)
+Chc [ :R] Use ○ R%-3s (yours/current)
+Chc [ :R] Use ● R%-3s (theirs/other)
 Chc [ :R] Use △ R%-3s (base)
 
 Txt Keep
@@ -1096,7 +1096,7 @@ class Operations:
 		conflict = self.getUnresolvedConflict(number)
 		if not conflict: return
 		paths = {
-			"local"   : conflict.local(),
+			"local"   : conflict.path(),
 			"current" : conflict.current(),
 			"other"   : conflict.other(),
 			"base"    : conflict.base(),

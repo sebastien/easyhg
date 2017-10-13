@@ -124,7 +124,12 @@ def get(name=None):
 	else:
 		if MERGETOOL != None: return MERGETOOL
 		if os.environ.has_key("MERGETOOL"):
-			MERGETOOL = os.environ.get("MERGETOOL")
+			t  = os.environ.get("MERGETOOL")
+			nt = t.lower().strip()
+			if t not in TOOLS:
+				raise Exception("MERGETOOL should be one of {0}, got: `{1}`".format(", ".join(TOOLS.keys()), t))
+			else:
+				MERGETOOL = TOOLS.get[nt]
 			return MERGETOOL
 		else:
 			has_gvim    = which(GVIMDIFF["APP"])
