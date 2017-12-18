@@ -14,7 +14,7 @@
 
 # FIXME: There's some thinking to be done about how to best merge files
 
-import os, popen2
+import os, subprocess
 MERGETOOL = None
 
 HELP = """\
@@ -103,12 +103,16 @@ def shell_safe( path ):
 	"""Makes sure that the given path/string is escaped and safe for shell"""
 	return "".join([("\\" + _) if _ in SHELL_ESCAPE else _ for _ in path])
 
-def popen(command):
-	# FIXME: popen3[1] does not give the same results as popen !!
-	out, sin = popen2.popen4(command)
-	sin.close()
-	res = out.read() ; out.close()
-	return res
+def popen(command, cwd=None, check=False, detach=False):
+	"""Returns the stdout from the given command, using the subproces
+	command."""
+	cmd      = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd)
+	status   = cmd.wait()
+	res, err = cmd.communicate()
+	if status == 0:
+		return res.decode("utf8")
+	else:
+		return err.decode("utf8")
 
 def which(program):
 	"""Tells if the given program is available in the path."""
@@ -165,7 +169,7 @@ def _format( line, app=None, local=None, current=None, other=None, base=None ):
 	return line.format(**m)
 
 def _do( command, local=None, current=None, other=None, base=None ):
-	return os.popen(_cmd(command, local=local, current=current, other=other, base=base) +" &").read()
+	return popen(_cmd(command, local=local, current=current, other=other, base=base) +" &")
 
 def _cmd( command, local=None, current=None, other=None, base=None ):
 	tool    = get()
