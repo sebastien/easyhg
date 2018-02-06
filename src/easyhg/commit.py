@@ -589,6 +589,7 @@ def _commit( ui, repo, *args, **opts ):
 cmdtable       = {}
 command        = mercurial.cmdutil.command(cmdtable)
 COMMIT_COMMAND =  mercurial.commands.table["^commit|ci"]
+
 @command('easycommit', COMMIT_COMMAND[1])
 def commit( *args, **kwargs ):
 	return _commit(*args, **kwargs)

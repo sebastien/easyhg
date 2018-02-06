@@ -16,8 +16,8 @@
 #  - http://marc.info/?l=mercurial&m=114719261130043&w=2
 #  - http://marc.info/?t=114719277400001&r=1&w=2
 
-import os, sys, re, shutil, difflib, stat, sha, json
-import easyhg.mergetool as mergetool
+import os, sys, re, shutil, difflib, stat, hashlib, json
+import easyhg.mergetool
 from easyhg.output import *
 try:
 	import urwide, urwid
@@ -377,11 +377,15 @@ class ConsoleUI(urwide.Handler):
 		cur = c.getCurrentInfo()
 		oth = c.getOtherInfo()
 		par = c.getBaseInfo()
+		assert cur, "Missing CURRENT information"
+		assert oth, "Missing OTHER information"
+		assert par, "Missing PARENT information"
 		return cur, par, oth
 
 	def mergeInfo( self ):
 		"""Returns a user-friendly descirption of the merge"""
 		cur, par, oth = self.conflictsInfo()
+		print (cur,par,oth)
 		return INFO_TEMPLATE % (
 			cur[0],  cur[1], cur[2],
 			oth[0],  oth[1], oth[2],
@@ -395,7 +399,7 @@ class ConsoleUI(urwide.Handler):
 			self.updateConflicts()
 			self.ui.main()
 		else:
-			print "No conflicts found."
+			print ("No conflicts found.")
 
 	def conflictStateChanged( self, button, state ):
 		if not state == True: return
@@ -463,7 +467,7 @@ class ConsoleUI(urwide.Handler):
 			if path == conflict.path():
 				return "This is the local file"
 			sig_local = conflict._sig(conflict.current())
-			sig_right = sha.new(conflict._read(path)).hexdigest()
+			sig_right = hashlib.sha256(conflict._read(path)).hexdigest()
 			if sig_local == sig_right: return "Same content as the local file"
 			else: return "Not same content as local file: " + sig_right
 		if conflict.state == Conflict.RESOLVED:
@@ -738,7 +742,7 @@ class Conflict:
 		return r
 
 	def _sig( self, path ):
-		return sha.new(self._read(path)).hexdigest()
+		return hashlib.sha256(self._read(path)).hexdigest()
 
 	def _sigs( self ):
 		return self._sig(self.path()), self._sig(self.current()), \
@@ -782,7 +786,7 @@ class Conflict:
 		bse = cutpath(os.path.abspath(os.getcwd()), self.base())
 		res = self.state == self.RESOLVED and "R" or " "
 		# TODO: Add explanation for resolution (like "same as other")
-		return mergetool.review3(cur,loc,oth,run=False)
+		return easyhg.mergetool.review3(cur,loc,oth,run=False)
 
 	def __str__( self ):
 		a = cutpath(os.path.abspath(os.getcwd()), self.path())
@@ -878,6 +882,21 @@ class Conflicts:
 				self.setBaseInfo   (revs[2])
 				self._conflicts = [_.provision(revs[0], revs[1], revs[2]) for _ in self._conflicts]
 				self.save()
+			else:
+				if len(revs) >= 0:
+					self.setCurrentInfo(revs[0])
+				else:
+					self.setCurrentInfo(("N/A","N/A","N/A"))
+				if len(revs) >= 2:
+					self.setOtherInfo(revs[1])
+				else:
+					self.setOtherInfo(("N/A","N/A","N/A"))
+				if len(revs) >= 3:
+					self.setBaseInfo(revs[2])
+				else:
+					self.setBaseInfo(("N/A","N/A","N/A"))
+				# Sometimes we don't have all this.
+				pass
 			for c in self._conflicts:
 				c.conflicts = self
 
@@ -995,7 +1014,7 @@ class Operations:
 		self.color     = True
 
 	def output( self, message ):
-		print message
+		print (message)
 
 	def ask( self, message ):
 		return ask(message)
@@ -1038,16 +1057,16 @@ class Operations:
 		if len(args) == 0:
 			# NOTE: We don't show the ancestor in the diff3, we show both versions
 			# to be merged and the current one.
-			mergetool.review3( conflict.path(), conflict.current(), conflict.other())
+			easyhg.mergetool.review3( conflict.path(), conflict.current(), conflict.other())
 		elif len(args) == 2:
-			mergetool.review( *[conflict.get(_) for _ in args] )
+			easyhg.mergetool.review( *[conflict.get(_) for _ in args] )
 		elif len(args) == 3:
-			mergetool.review3( *[conflict.get(_) for _ in args] )
+			easyhg.mergetool.review3( *[conflict.get(_) for _ in args] )
 		else:
 			error ("Unsupported number or arugments: {0}".format(args))
 
 	def reviewConflictSources( self, conflict ):
-		mergetool.review3( conflict.current(), conflict.other(), conflict.base())
+		easyhg.mergetool.review3( conflict.current(), conflict.other(), conflict.base())
 
 	def getUnresolvedConflict( self, number ):
 		"""Returns an unresolved Conflict instance corresponding to the given
@@ -1083,7 +1102,7 @@ class Operations:
 		# 	self.info(u"{0} {1} {2}".format(*rev))
 		self.log("$ " + conflict.asCommand())
 		# TODO: Should add detail about the revision (auth
-		mergetool.merge3(paths["local"], paths["current"], paths["other"], paths["base"])
+		easyhg.mergetool.merge3(paths["local"], paths["current"], paths["other"], paths["base"])
 		res = self.ask("Did you resolve the conflict (y/n) ? ")
 		if res == "y":
 			self.info("Conflict resolved")
@@ -1211,7 +1230,7 @@ class Operations:
 # -----------------------------------------------------------------------------
 
 def hg_get_revision_info(rev, path="."):
-	detail = os.popen("cd '%s' ; hg log -r%s" % (path,rev)).read()
+	detail = os.popen("cd '%s' ; hg log -r%s" % (path,rev)).read().decode("utf-8")
 	info  = []
 	for line in detail.split("\n"):
 		if line.startswith("user:"):
@@ -1265,7 +1284,7 @@ def run(args):
 				tool = a[1:]
 			elif a in ("keep", "base", "other", "current"):
 				conflicts[-1][1] = a
-		if tool: mergetool.set(tool)
+		if tool: easyhg.mergetool.set(tool)
 		# TODO: Implement this properly
 		for number, method in conflicts:
 			ops.resolveConflict(number, method)
@@ -1318,7 +1337,7 @@ def run(args):
 		)
 		return 0
 	else:
-		print USAGE
+		print (USAGE)
 		return -1
 
 if __name__ == "__main__":
